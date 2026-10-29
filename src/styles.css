@@ -79,10 +79,13 @@ body{min-width:760px;background:#0b1722}
 .map-controls button:hover{background:rgba(141,185,203,.12);color:#fff}
 .map-legend{
   left:50%;bottom:16px;transform:translateX(-50%);z-index:450;max-width:calc(100% - 48px);
-  flex-wrap:wrap;justify-content:center;gap:8px 15px;padding:9px 13px;
+  flex-wrap:wrap;justify-content:center;gap:10px 20px;padding:13px 18px;
   border:1px solid var(--glass-border-strong);border-radius:10px;background:var(--glass-panel);
   box-shadow:var(--glass-shadow);color:#e0eaf0
 }
+.map-legend>span{gap:8px;font-size:14px;line-height:1.3}
+.map-legend .legend-line{width:21px;height:4px;flex:0 0 21px}
+.map-legend .legend-handle{width:12px;height:12px;flex:0 0 12px}
 .scale-note{color:#afbfca}
 .leaflet-overlay-pane path{filter:drop-shadow(0 1px 1.5px rgba(4,14,24,.9))}
 .vertex-dot{box-shadow:0 0 0 2px rgba(14,27,40,.88),0 3px 9px rgba(4,13,22,.6)}
@@ -195,6 +198,33 @@ body{min-width:760px;background:#0b1722}
     backdrop-filter:blur(var(--glass-blur)) saturate(125%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(125%)
   }
 }
+
+.intermediate-results{display:grid;gap:8px;margin:10px 0 14px}
+.intermediate-results-heading{margin:0;color:#d7e5e9;font-size:10px;font-weight:700;line-height:1.45}
+.intermediate-result{min-width:0;padding:9px;border:1px solid rgba(180,210,224,.18);border-radius:8px;background:rgba(9,20,29,.48)}
+.intermediate-result-header{display:flex;align-items:flex-start;justify-content:space-between;gap:7px;margin-bottom:7px}
+.intermediate-result-header>div{display:flex;min-width:0;flex-direction:column;gap:3px}
+.intermediate-result-header>div>strong{color:#f0f6f8;font-size:11px;overflow-wrap:anywhere}
+.intermediate-result-header small{color:#aebfc8;font-size:8px;line-height:1.35}
+.intermediate-result-status{flex:0 0 auto;text-align:right;font-size:8px;line-height:1.35}
+.intermediate-result-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.intermediate-result-metrics>div{display:flex;min-width:0;flex-direction:column;gap:3px;padding:6px;border:1px solid rgba(180,210,224,.11);border-radius:5px;background:rgba(255,255,255,.025)}
+.intermediate-result-metrics span,.intermediate-loss-values span{color:#adbdc5;font-size:8px;line-height:1.35}
+.intermediate-result-metrics strong{color:#e9f1f4;font-size:9px;line-height:1.35;overflow-wrap:anywhere}
+.intermediate-result-details{margin-top:7px;color:#dce7eb;font-size:9px}
+.intermediate-result-details>summary{padding:5px 0;color:#a8e4d3;font-weight:600;cursor:pointer}
+.intermediate-result-note{margin:5px 0;color:#bcc9cf;font-size:8px;line-height:1.45}
+.intermediate-loss-list{display:grid;gap:6px}
+.intermediate-loss-entry{display:grid;gap:5px;padding:7px;border:1px solid rgba(180,210,224,.12);border-radius:5px;background:rgba(255,255,255,.025)}
+.intermediate-loss-title{display:flex;flex-direction:column;gap:3px;min-width:0}
+.intermediate-loss-title strong{color:#eaf2f4;font-size:9px;line-height:1.35;overflow-wrap:anywhere}
+.intermediate-loss-title small,.intermediate-loss-source{color:#b0c0c8;font-size:8px;line-height:1.4;overflow-wrap:anywhere}
+.intermediate-loss-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.intermediate-loss-values span{display:flex;flex-direction:column;gap:2px;padding:4px;border-radius:4px;background:rgba(0,0,0,.12)}
+.intermediate-loss-values strong{color:#f0f5f7;font-size:9px}
+.intermediate-category-totals,.intermediate-provenance{display:grid;gap:3px;margin-top:7px;color:#c1ced3;font-size:8px;line-height:1.4;overflow-wrap:anywhere}
+.intermediate-category-totals>strong,.intermediate-provenance>strong{color:#e1ebef}
+.intermediate-diagnostics{display:grid;gap:4px;margin:7px 0 0;padding-left:16px;color:#f0d29a;font-size:8px;line-height:1.45;overflow-wrap:anywhere}
 @supports not (backdrop-filter:blur(1px)){
   .topbar{background:#101d2a}.left-rail,.right-rail,.map-toolbar,.map-legend,.topology-zoom-label{background:#10202e}
   .results-card,.customer-card,.topology-card{background:#172937}
@@ -537,6 +567,12 @@ button:hover:not(:disabled){transition:background-color .15s,border-color .15s,c
 .cable-measurement-preview[hidden]{display:none}
 .cable-measurement-segment{color:#ffd18e}
 .cable-measurement-total{color:#d9f5e9}
+
+.report-toolbar-actions{display:flex;align-items:center;gap:10px}
+.report-close-button{display:grid;place-items:center;width:38px;height:38px;padding:0;border:1px solid #9ba9aa;border-radius:5px;background:#fff;color:#263d3b;font-size:25px;line-height:1}
+.report-close-button:hover{border-color:#477e72;background:#edf4f2;color:#173b34}
+.report-close-button:focus-visible{outline:3px solid #377b6b;outline-offset:2px}
+@media(max-width:520px){.report-toolbar{align-items:flex-start;flex-wrap:wrap}.report-toolbar-actions{margin-left:auto}}
 
 /* Let the basemap show through the primary glass panels without softening map content. */
 @supports (backdrop-filter:blur(1px)){

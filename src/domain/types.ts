@@ -193,6 +193,26 @@ export interface OpticalBudgetResult {
     datasheetReferences?: Array<Record<string, unknown>>; fieldMeasurements?: Array<Record<string, unknown>>;
     locationLossSummary?: Record<string, number | null>;
   }>;
+  intermediateNodes?: Array<{
+    nodeId: string; nodeName: string; nodeType: "odc" | "odp";
+    status: "estimated" | "unknown" | "ambiguous" | "unreachable";
+    sourceOltId?: string | null; nodeIds?: string[]; connectionIds?: string[];
+    lengthM: number | null; accumulatedLossDb: number | null;
+    estimatedPowerDbm: number | null; transmitterPowerDbm?: number | null; sourceOltName?: string | null;
+    lossBreakdown?: Array<{
+      componentId: string; component: string;
+      category: "fiber" | "connector" | "splice" | "splitter" | "passive_component";
+      position: string; quantity?: number | null; quantityUnit?: string | null;
+      calculationQuantity?: number | null; calculationQuantityUnit?: string | null;
+      unitLossDb?: number | null; unitLossUnit?: string | null;
+      totalLossDb: number | null; cumulativeLossDb: number | null; source?: string | null;
+      nodeId?: string | null; connectionId?: string | null; cableSegmentId?: string | null;
+      cableName?: string | null; cableCategory?: string | null; pathPosition: number;
+    }>;
+    categoryLossesDb?: Record<string, number | null>;
+    parameterSources?: Record<string, "configured" | "profile_default" | "legacy_fallback" | "unknown">;
+    diagnostics?: string[];
+  }>;
   disconnectedCustomerIds: string[];
   summary?: Record<string, unknown> | null;
   diagnostics?: Array<Record<string, unknown>>;

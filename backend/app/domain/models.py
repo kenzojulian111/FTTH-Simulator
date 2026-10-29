@@ -838,6 +838,7 @@ class OpticalBudgetResult(CamelModel):
     calculated_at: str
     links: List[OpticalLinkResult]
     paths: List["OpticalPathResult"] = Field(default_factory=list)
+    intermediate_nodes: List["IntermediateOpticalResult"] = Field(default_factory=list)
     disconnected_customer_ids: List[str] = Field(default_factory=list)
     summary: Optional[Dict[str, Any]] = None
     diagnostics: List[Dict[str, Any]] = Field(default_factory=list)
@@ -868,6 +869,49 @@ class OpticalPathSegment(CamelModel):
     pigtail_splices_count: Optional[int] = None
     pigtail_splice_loss_db: Optional[float] = None
     total_segment_loss_db: Optional[float] = None
+
+
+class IntermediateOpticalResult(CamelModel):
+    """Estimated optical power at a passive ODC/ODP along a directed OLT path."""
+    node_id: str
+    node_name: str
+    node_type: Literal["odc", "odp"]
+    status: Literal["estimated", "unknown", "ambiguous", "unreachable"]
+    source_olt_id: Optional[str] = None
+    node_ids: List[str] = Field(default_factory=list)
+    connection_ids: List[str] = Field(default_factory=list)
+    length_m: Optional[float] = None
+    accumulated_loss_db: Optional[float] = None
+    estimated_power_dbm: Optional[float] = None
+    transmitter_power_dbm: Optional[float] = None
+    source_olt_name: Optional[str] = None
+    loss_breakdown: List["IntermediateOpticalLossItem"] = Field(default_factory=list)
+    category_losses_db: Dict[str, Optional[float]] = Field(default_factory=dict)
+    parameter_sources: Dict[str, Literal["configured", "profile_default", "legacy_fallback", "unknown"]] = Field(default_factory=dict)
+    diagnostics: List[str] = Field(default_factory=list)
+
+
+class IntermediateOpticalLossItem(CamelModel):
+    """One loss-bearing item in path order; loss values come from the optical evaluator."""
+    component_id: str
+    component: str
+    category: Literal["fiber", "connector", "splice", "splitter", "passive_component"]
+    position: str
+    quantity: Optional[float] = None
+    quantity_unit: Optional[str] = None
+    calculation_quantity: Optional[float] = None
+    calculation_quantity_unit: Optional[str] = None
+    unit_loss_db: Optional[float] = None
+    unit_loss_unit: Optional[str] = None
+    total_loss_db: Optional[float] = None
+    cumulative_loss_db: Optional[float] = None
+    source: Optional[str] = None
+    node_id: Optional[str] = None
+    connection_id: Optional[str] = None
+    cable_segment_id: Optional[str] = None
+    cable_name: Optional[str] = None
+    cable_category: Optional[str] = None
+    path_position: int
 
 
 class OpticalDiagnostic(CamelModel):

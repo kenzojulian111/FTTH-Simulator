@@ -18,6 +18,7 @@ from backend.app.domain.models import (
     NodeType,
     OpticalBudgetConfig,
     OpticalBudgetResult,
+    IntermediateOpticalLossItem,
     OpticalDiagnostic,
     OpticalLinkResult,
     OpticalPathResult,
@@ -165,6 +166,7 @@ def _get_splitter_loss_for_node(node: NetworkNode, config: OpticalBudgetConfig) 
 def calculate_optical_budget(
     project: Project,
     config_override: Optional[OpticalBudgetConfig] = None,
+    _include_intermediate: bool = True,
 ) -> OpticalBudgetResult:
     """Calculate the optical power budget for all topology connections in a project."""
     config = config_override or project.settings.optical_budget
@@ -1807,11 +1809,316 @@ def calculate_optical_budget(
         if component.connection_id and component.connection_id not in known_connection_ids:
             component_diagnostics.append({"code": "missing_optical_component_connection", "componentId": component.id, "connectionId": component.connection_id})
 
+    # Intermediate readings are prefixes of the already evaluated OLT->ONT
+    # paths. This deliberately reuses segment and splitter results rather than
+    # implementing a second attenuation formula. A splitter is charged once
+    # when its node is reached, matching the end-to-end path convention.
+    intermediate_nodes = []
+    def prefix_parameter_sources(path: OpticalPathResult, node_ids: list[str], connection_ids: list[str]) -> Dict[str, str]:
+        cable_ids = {
+            connection.cable_segment_id
+            for connection in project.connections
+            if connection.id in connection_ids
+        }
+        component_ids = {
+            component.id for component in project.optical_components
+            if ((component.node_id and component.node_id in node_ids)
+                or (component.connection_id and component.connection_id in connection_ids))
+        }
+        scope_ids = set(node_ids) | cable_ids | component_ids
+        return {
+            key: value for key, value in path.parameter_sources.items()
+            if key == "txPowerDbm" or key.split(".", 1)[0] in scope_ids
+        }
+
+    def make_loss_breakdown(path: OpticalPathResult, prefix_node_ids: list[str], prefix_connection_ids: list[str]):
+        """Present evaluator outputs in topology order; never recompute unit losses."""
+        rows = []
+        category_values: Dict[str, list] = {key: [] for key in ("fiber", "connector", "splice", "splitter", "passive_component")}
+        cumulative: Optional[float] = 0.0
+        seen_components = set()
+        segments = path.segments[:len(prefix_connection_ids)]
+        connections_by_id = {connection.id: connection for connection in project.connections}
+        cables_by_id = {cable.id: cable for cable in project.cable_segments}
+        nodes_by_path_id = {node.id: node for node in project.nodes}
+        splitter_by_node = {splitter.node_id: splitter for splitter in path.splitters}
+        component_records = {str(item.get("componentId")): item for item in path.component_losses}
+        components_by_node: Dict[str, list] = {}
+        components_by_connection: Dict[str, list] = {}
+        for component in project.optical_components:
+            if component.id not in component_records:
+                continue
+            if component.node_id in prefix_node_ids:
+                components_by_node.setdefault(component.node_id, []).append(component)
+            if component.connection_id in prefix_connection_ids:
+                components_by_connection.setdefault(component.connection_id, []).append(component)
+
+        def append_row(**values):
+            nonlocal cumulative
+            loss = values.get("total_loss_db")
+            if loss is None:
+                cumulative = None
+            elif cumulative is not None:
+                cumulative += float(loss)
+            category_values[values["category"]].append(loss)
+            rows.append(IntermediateOpticalLossItem(**values, cumulative_loss_db=round(cumulative, 2) if cumulative is not None else None))
+
+        def append_node_items(node_id: str, position: int):
+            splitter = splitter_by_node.get(node_id)
+            node = nodes_by_path_id.get(node_id)
+            if splitter:
+                append_row(
+                    component_id=f"{node_id}:splitter", component=f"Splitter · {splitter.node_name} ({node_id}){f' · {splitter.splitter_ratio}' if splitter.splitter_ratio else ''}",
+                    category="splitter", position=f"At {node.name if node else node_id} (topology node {position + 1})",
+                    quantity=1.0, quantity_unit="device", unit_loss_db=splitter.loss_db,
+                    unit_loss_unit="dB/device", total_loss_db=splitter.loss_db,
+                    source=path.parameter_sources.get(f"{node_id}.splitterLossDb", "unknown"),
+                    node_id=node_id, path_position=position,
+                )
+            for component in components_by_node.get(node_id, []):
+                if component.id in seen_components:
+                    continue
+                seen_components.add(component.id)
+                record = component_records[component.id]
+                value = record.get("lossDb")
+                append_row(
+                    component_id=component.id, component=f"{component.kind} · {component.id}", category="passive_component",
+                    position=f"At {node.name if node else node_id} (topology node {position + 1})",
+                    quantity=1.0, quantity_unit="component", unit_loss_db=value, unit_loss_unit="dB/component",
+                    total_loss_db=value if isinstance(value, (int, float)) else None,
+                    source=str(record.get("source", component.configured_source)), node_id=node_id, path_position=position,
+                )
+
+        if prefix_node_ids:
+            append_node_items(prefix_node_ids[0], 0)
+        for index, segment in enumerate(segments):
+            connection = connections_by_id.get(segment.connection_id)
+            cable = cables_by_id.get(segment.cable_segment_id)
+            position = f"{segment.from_node_name} → {segment.to_node_name} (hop {index + 1})"
+            cable_category = segment.cable_category or (cable.cable_type if cable else None) or "Unspecified"
+            segment_source = path.parameter_sources.get(f"{segment.cable_segment_id}.fiberAttenuationDbPerKm", "unknown")
+            length = segment.route_length_contribution_m
+            append_row(
+                component_id=f"{segment.cable_segment_id}:fiber:{segment.connection_id}",
+                component=f"Fiber attenuation · {segment.cable_name} ({segment.cable_segment_id}) · {cable_category}",
+                category="fiber", position=position,
+                quantity=segment.length_m if length is not None else None, quantity_unit="m",
+                calculation_quantity=length, calculation_quantity_unit="m",
+                unit_loss_db=segment.attenuation_db_per_km, unit_loss_unit="dB/km", total_loss_db=segment.fiber_loss_db,
+                source=segment_source, connection_id=segment.connection_id, cable_segment_id=segment.cable_segment_id,
+                cable_name=segment.cable_name, cable_category=cable_category, path_position=index,
+            )
+            connector_unit = segment.connector_loss_db / segment.connectors_count if segment.connectors_count and segment.connector_loss_db is not None else None
+            append_row(
+                component_id=f"{segment.connection_id}:connectors", component=f"Connectors · {segment.cable_name} ({segment.cable_segment_id})",
+                category="connector", position=position, quantity=segment.connectors_count, quantity_unit="connector",
+                unit_loss_db=round(connector_unit, 4) if connector_unit is not None else None,
+                unit_loss_unit="dB/connector", total_loss_db=segment.connector_loss_db,
+                source=path.parameter_sources.get(f"{segment.cable_segment_id}.connectorLossDb", "unknown"),
+                connection_id=segment.connection_id, cable_segment_id=segment.cable_segment_id,
+                cable_name=segment.cable_name, cable_category=cable_category, path_position=index,
+            )
+            route_splice_count = segment.splices_count
+            route_splice_total = (
+                round(segment.splice_loss_db - segment.pigtail_splice_loss_db, 2)
+                if segment.splice_loss_db is not None and segment.pigtail_splices_count and segment.pigtail_splice_loss_db is not None
+                else segment.splice_loss_db if not segment.pigtail_splices_count else None
+            )
+            route_splice_unit = route_splice_total / route_splice_count if route_splice_count and route_splice_total is not None else None
+            append_row(
+                component_id=f"{segment.connection_id}:splices", component=f"Splices · {segment.cable_name} ({segment.cable_segment_id})",
+                category="splice", position=position, quantity=route_splice_count, quantity_unit="splice",
+                unit_loss_db=round(route_splice_unit, 4) if route_splice_unit is not None else None,
+                unit_loss_unit="dB/splice", total_loss_db=route_splice_total,
+                source=path.parameter_sources.get(f"{segment.cable_segment_id}.spliceLossDb", "unknown"),
+                connection_id=segment.connection_id, cable_segment_id=segment.cable_segment_id,
+                cable_name=segment.cable_name, cable_category=cable_category, path_position=index,
+            )
+            if segment.pigtail_splices_count:
+                append_row(
+                    component_id=f"{segment.connection_id}:pigtail-splices", component=f"Pigtail splices · {segment.cable_name} ({segment.cable_segment_id})",
+                    category="splice", position=position, quantity=segment.pigtail_splices_count, quantity_unit="splice",
+                    unit_loss_db=segment.pigtail_splice_loss_db / segment.pigtail_splices_count if segment.pigtail_splice_loss_db is not None else None,
+                    unit_loss_unit="dB/splice", total_loss_db=segment.pigtail_splice_loss_db,
+                    source=path.parameter_sources.get(f"{segment.cable_segment_id}.pigtailSpliceLossDb", "unknown"),
+                    connection_id=segment.connection_id, cable_segment_id=segment.cable_segment_id,
+                    cable_name=segment.cable_name, cable_category=cable_category, path_position=index,
+                )
+            if connection:
+                for component in components_by_connection.get(connection.id, []):
+                    if component.id in seen_components:
+                        continue
+                    seen_components.add(component.id)
+                    record = component_records[component.id]
+                    value = record.get("lossDb")
+                    append_row(
+                        component_id=component.id, component=f"{component.kind} · {component.id}", category="passive_component",
+                        position=f"On {position}", quantity=1.0, quantity_unit="component", unit_loss_db=value,
+                        unit_loss_unit="dB/component", total_loss_db=value if isinstance(value, (int, float)) else None,
+                        source=str(record.get("source", component.configured_source)), connection_id=connection.id,
+                        path_position=index,
+                    )
+            append_node_items(segment.to_node_id, index + 1)
+
+        category_totals = {
+            category: (None if any(value is None for value in values) else round(sum(values), 2)) if values else 0.0
+            for category, values in category_values.items()
+        }
+        return rows, category_totals
+
+    for target in ((node for node in project.nodes if node.type in {NodeType.ODC, NodeType.ODP}) if _include_intermediate else []):
+        reachable_paths = 0
+        def count_routes(current_id: str, visited: set) -> None:
+            nonlocal reachable_paths
+            if reachable_paths >= 2:
+                return
+            if current_id == target.id:
+                reachable_paths += 1
+                return
+            for edge in all_optical_outgoing.get(current_id, []):
+                if edge.to_node_id not in visited:
+                    count_routes(edge.to_node_id, visited | {edge.to_node_id})
+        for olt in (node for node in project.nodes if node.type == NodeType.OLT):
+            count_routes(olt.id, {olt.id})
+            if reachable_paths >= 2:
+                break
+        if reachable_paths > 1:
+            intermediate_nodes.append({
+                "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
+                "status": "ambiguous", "diagnostics": ["Multiple directed OLT paths reach this passive node."],
+            })
+            continue
+        candidate_prefixes = {}
+        for path in paths:
+            if target.id not in path.node_ids:
+                continue
+            target_index = path.node_ids.index(target.id)
+            if target_index == 0:
+                continue
+            prefix_node_ids = path.node_ids[: target_index + 1]
+            prefix_connection_ids = path.connection_ids[:target_index]
+            key = tuple(prefix_connection_ids)
+            candidate_prefixes.setdefault(key, (path, target_index, prefix_node_ids, prefix_connection_ids))
+
+        if len(candidate_prefixes) > 1:
+            intermediate_nodes.append({
+                "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
+                "status": "ambiguous", "diagnostics": ["Multiple directed OLT paths reach this passive node."],
+            })
+            continue
+        if not candidate_prefixes:
+            if reachable_paths == 1:
+                # Reuse the existing ONT path evaluator by making a temporary
+                # analysis copy that terminates at this passive node. No data
+                # is persisted and the passive node remains non-transmitting.
+                probe_nodes = [
+                    node.model_copy(update={"type": NodeType.ONT}) if node.id == target.id else node
+                    for node in project.nodes
+                ]
+                probe = calculate_optical_budget(
+                    project.model_copy(update={"nodes": probe_nodes}),
+                    config_override=config,
+                    _include_intermediate=False,
+                )
+                probe_path = next((item for item in probe.paths if item.ont_node_id == target.id), None)
+                if probe_path is None or probe_path.connectivity_status != "connected":
+                    intermediate_nodes.append({
+                        "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
+                        "status": "unknown", "diagnostics": ["The directed route could not be evaluated as a valid optical path."]
+                            + ([str(item.message) for item in probe_path.diagnostics] if probe_path else []),
+                    })
+                    continue
+                probe_diagnostics = [item.message for item in probe_path.diagnostics]
+                probe_diagnostics.extend(probe_path.calculation_limitations)
+                probe_sources = prefix_parameter_sources(probe_path, probe_path.node_ids, probe_path.connection_ids)
+                unverified_sources = [key for key, source in probe_sources.items() if source in {"legacy_fallback", "unknown"}]
+                if unverified_sources:
+                    probe_diagnostics.append("Unverified optical input provenance: " + ", ".join(unverified_sources))
+                probe_breakdown, probe_category_losses = make_loss_breakdown(probe_path, probe_path.node_ids, probe_path.connection_ids)
+                intermediate_nodes.append({
+                    "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
+                    "status": "estimated" if probe_path.received_power_dbm is not None and not unverified_sources else "unknown",
+                    "source_olt_id": probe_path.node_ids[0] if probe_path.node_ids else None,
+                    "node_ids": probe_path.node_ids, "connection_ids": probe_path.connection_ids,
+                    "length_m": probe_path.length_m, "accumulated_loss_db": probe_path.loss_db,
+                    "estimated_power_dbm": probe_path.received_power_dbm,
+                    "transmitter_power_dbm": probe_path.tx_power_dbm,
+                    "source_olt_name": nodes_by_id[probe_path.node_ids[0]].name if probe_path.node_ids and probe_path.node_ids[0] in nodes_by_id else None,
+                    "loss_breakdown": probe_breakdown, "category_losses_db": probe_category_losses,
+                    "parameter_sources": probe_sources,
+                    "diagnostics": probe_diagnostics,
+                })
+                continue
+            intermediate_nodes.append({
+                "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
+                "status": "unreachable", "diagnostics": ["No evaluated directed OLT path reaches this node."],
+            })
+            continue
+
+        path, target_index, prefix_node_ids, prefix_connection_ids = next(iter(candidate_prefixes.values()))
+        prefix_segments = path.segments[:target_index]
+        diagnostics = []
+        segment_losses = [segment.total_segment_loss_db for segment in prefix_segments]
+        length_parts = [segment.route_length_contribution_m for segment in prefix_segments]
+        if any(value is None for value in segment_losses):
+            diagnostics.append("One or more route segment losses are incomplete.")
+        if any(value is None for value in length_parts):
+            diagnostics.append("One or more route lengths are unknown.")
+
+        prefix_splitters = [splitter for splitter in path.splitters if splitter.node_id in prefix_node_ids]
+        splitter_losses = [splitter.loss_db for splitter in prefix_splitters]
+        if any(value is None for value in splitter_losses):
+            diagnostics.append("A splitter on the prefix has unknown insertion loss.")
+
+        prefix_components = []
+        seen_component_ids = set()
+        for component in project.optical_components:
+            attached = ((component.node_id and component.node_id in prefix_node_ids)
+                        or (component.connection_id and component.connection_id in prefix_connection_ids))
+            if attached and component.id not in seen_component_ids:
+                prefix_components.append(component)
+                seen_component_ids.add(component.id)
+        component_losses = [
+            component.configured_loss_db
+            if component.configured_source == "configured" else None
+            for component in prefix_components
+        ]
+        if any(value is None for value in component_losses):
+            diagnostics.append("An explicitly modeled passive component has unknown configured loss.")
+
+        loss_parts = segment_losses + splitter_losses + component_losses
+        complete_loss = all(value is not None for value in loss_parts)
+        total_loss = round(sum(value for value in loss_parts if value is not None), 2) if complete_loss else None
+        tx_power = path.tx_power_dbm
+        estimated_power = round(tx_power - total_loss, 2) if tx_power is not None and total_loss is not None else None
+        if tx_power is None:
+            diagnostics.append("OLT launch power is unknown.")
+        parameter_sources = prefix_parameter_sources(path, prefix_node_ids, prefix_connection_ids)
+        unverified_sources = [key for key, source in parameter_sources.items() if source in {"legacy_fallback", "unknown"}]
+        if unverified_sources:
+            diagnostics.append("Unverified optical input provenance: " + ", ".join(unverified_sources))
+        complete_length = all(value is not None for value in length_parts)
+        length_m = round(sum(value for value in length_parts if value is not None), 2) if complete_length else None
+        loss_breakdown, category_losses = make_loss_breakdown(path, prefix_node_ids, prefix_connection_ids)
+        intermediate_nodes.append({
+            "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
+            "status": "estimated" if estimated_power is not None and not unverified_sources else "unknown",
+            "source_olt_id": path.node_ids[0] if path.node_ids else None,
+            "node_ids": prefix_node_ids, "connection_ids": prefix_connection_ids,
+            "length_m": length_m, "accumulated_loss_db": total_loss,
+            "estimated_power_dbm": estimated_power, "transmitter_power_dbm": tx_power,
+            "source_olt_name": nodes_by_id[path.node_ids[0]].name if path.node_ids and path.node_ids[0] in nodes_by_id else None,
+            "loss_breakdown": loss_breakdown, "category_losses_db": category_losses,
+            "parameter_sources": parameter_sources,
+            "diagnostics": diagnostics,
+        })
+
     return OpticalBudgetResult(
         project_id=project.id,
         calculated_at=current_utc_timestamp(),
         links=link_results,
         paths=paths,
+        intermediate_nodes=intermediate_nodes,
         disconnected_customer_ids=disconnected_customer_ids,
         summary=summary,
         diagnostics=component_diagnostics,

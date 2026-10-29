@@ -5,5 +5,11 @@ export function EngineeringReportLinks({ onOpenRab, onOpenOptical, onOpenPoles }
 }
 
 export function ReportToolbar({ onBack }: { onBack: () => void }) {
-  return <div className="report-toolbar"><button type="button" className="load-button" onClick={onBack}>← Back to editor</button><button type="button" className="primary-button" onClick={() => window.print()}>Print / Save as PDF</button></div>;
+  return <div className="report-toolbar">
+    <button type="button" className="load-button" onClick={onBack}>← Back to Editor</button>
+    <div className="report-toolbar-actions">
+      <button type="button" className="primary-button" onClick={() => window.print()}>Print / Save as PDF</button>
+      <button type="button" className="report-close-button" onClick={onBack} aria-label="Close report" title="Close report"><span aria-hidden="true">×</span></button>
+    </div>
+  </div>;
 }

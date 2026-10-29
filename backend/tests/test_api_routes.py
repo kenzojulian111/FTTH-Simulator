@@ -357,6 +357,8 @@ def test_unpersisted_project_calculation_returns_404_and_succeeds_after_save(cli
     assert len(opt_res["paths"]) == 1
     assert opt_res["paths"][0]["ontNodeId"] == "node-ont"
     assert opt_res["paths"][0]["status"] in ("pass", "fail")
+    assert {item["nodeType"] for item in opt_res["intermediateNodes"]} == {"odc", "odp"}
+    assert all("estimatedPowerDbm" in item and "status" in item and "lossBreakdown" in item for item in opt_res["intermediateNodes"])
     assert opt_res["paths"][0]["profileId"] is None
     assert opt_res["paths"][0]["parameterSources"]["cable-1.fiberAttenuationDbPerKm"] == "configured"
     assert opt_res["disconnectedCustomerIds"] == []

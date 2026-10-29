@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConstructionCostResult, OpticalBudgetResult } from "../../domain/types";
@@ -32,6 +32,13 @@ function projectFixture() {
   project.connections = [{ id: "link", fromNodeId: "olt", toNodeId: "ont", cableSegmentId: "cable" }];
   project.customers = [{ id: "customer", name: "Customer One", address: "", location: point, status: "connected", ontNodeId: "ont", properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt }];
   return project;
+}
+
+function ReportReturnHarness({ project }: { project: ReturnType<typeof projectFixture> }) {
+  const [showReport, setShowReport] = useState(true);
+  return showReport
+    ? <OpticalEngineeringReport project={project} result={null} loading={false} error={null} onBack={() => setShowReport(false)} />
+    : <div aria-label="Editor">Editor · {project.name}</div>;
 }
 
 const opticalResult: OpticalBudgetResult = {
@@ -233,12 +240,22 @@ describe("engineering reports", () => {
     const buttons = Array.from(view.querySelectorAll("button"));
     act(() => buttons.find((button) => button.textContent === "Open RAB report")?.click());
     act(() => buttons.find((button) => button.textContent === "Open optical report")?.click());
-    act(() => buttons.find((button) => button.textContent?.includes("Back to editor"))?.click());
+    act(() => buttons.find((button) => button.textContent?.includes("Back to Editor"))?.click());
+    act(() => view.querySelector<HTMLButtonElement>('[aria-label="Close report"]')?.click());
     act(() => buttons.find((button) => button.textContent?.includes("Print / Save as PDF"))?.click());
     expect(onRab).toHaveBeenCalledOnce();
     expect(onOptical).toHaveBeenCalledOnce();
-    expect(onBack).toHaveBeenCalledOnce();
+    expect(onBack).toHaveBeenCalledTimes(2);
     expect(print).toHaveBeenCalledOnce();
+    expect(view.querySelector(".report-toolbar")?.contains(view.querySelector('[aria-label="Close report"]'))).toBe(true);
+  });
+
+  it("returns to the editor from the close control without replacing the current project", () => {
+    const project = projectFixture();
+    const view = render(<ReportReturnHarness project={project} />);
+    expect(view.querySelector(".report-project")?.textContent).toBe(project.name);
+    act(() => view.querySelector<HTMLButtonElement>('[aria-label="Close report"]')?.click());
+    expect(view.querySelector('[aria-label="Editor"]')?.textContent).toContain(project.name);
   });
 
   it("renders explainable structured diagnostics with severity, code, thresholds, provenance, corrective action, and calculation limitations", () => {
