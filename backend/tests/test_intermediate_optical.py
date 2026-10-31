@@ -47,12 +47,30 @@ def test_olt_odc_odp_and_ont_use_the_same_physical_path_losses():
     assert odc.length_m == 1000
     assert odc.accumulated_loss_db == 8.1  # 0.4 fiber + 0.4 connectors + 0.1 splice + 7.2 splitter
     assert odc.estimated_power_dbm == -5.1
+    assert odc.transmitter_power_dbm == 3.0
+    assert odc.category_losses_db == {"fiber": 0.4, "connector": 0.4, "splice": 0.1, "splitter": 7.2, "passive_component": 0.0}
+    fiber = next(row for row in odc.loss_breakdown if row.category == "fiber")
+    assert (fiber.quantity, fiber.calculation_quantity, fiber.unit_loss_db, fiber.total_loss_db) == (1000, 1000, 0.4, 0.4)
+    assert fiber.cumulative_loss_db == 0.4
+    splitter = next(row for row in odc.loss_breakdown if row.category == "splitter")
+    assert splitter.position == "At odc (topology node 2)"
+    assert splitter.total_loss_db == 7.2
     assert odp.node_id == "odp" and odp.length_m == 2000
     assert odp.accumulated_loss_db == 19.5
     assert odp.estimated_power_dbm == -16.5
+    assert [row.total_loss_db for row in odp.loss_breakdown if row.category == "splitter"] == [7.2, 10.5]
+    assert odp.category_losses_db["splitter"] == 17.7
+    assert odc.design_margin_db == odp.design_margin_db == 3.0
+    assert odc.total_design_allowance_db == 11.1
+    assert odp.total_design_allowance_db == 22.5
     # ONT retains its end-to-end receiver-budget calculation, with splitter losses once each.
     assert ont_path.details["splitterLossDb"] == 17.7
     assert ont_path.loss_db == 20.4
+    assert ont_path.design_margin_db == 3.0
+    assert ont_path.total_design_allowance_db == 23.4
+    assert ont_path.received_power_dbm == 3.0 - ont_path.loss_db
+    assert len([row for row in ont_path.loss_breakdown if row.category == "splitter"]) == 2
+    assert ont_path.category_losses_db["splitter"] == 17.7
 
 
 def test_component_rows_show_segment_losses_splitter_positions_and_running_totals():

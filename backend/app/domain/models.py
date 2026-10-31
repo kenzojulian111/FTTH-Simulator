@@ -884,6 +884,8 @@ class IntermediateOpticalResult(CamelModel):
     accumulated_loss_db: Optional[float] = None
     estimated_power_dbm: Optional[float] = None
     transmitter_power_dbm: Optional[float] = None
+    design_margin_db: Optional[float] = None
+    total_design_allowance_db: Optional[float] = None
     source_olt_name: Optional[str] = None
     loss_breakdown: List["IntermediateOpticalLossItem"] = Field(default_factory=list)
     category_losses_db: Dict[str, Optional[float]] = Field(default_factory=dict)
@@ -976,6 +978,10 @@ class OpticalPathResult(CamelModel):
     datasheet_references: List[Dict[str, Any]] = Field(default_factory=list)
     field_measurements: List[Dict[str, Any]] = Field(default_factory=list)
     location_loss_summary: Dict[str, Optional[float]] = Field(default_factory=dict)
+    loss_breakdown: List[IntermediateOpticalLossItem] = Field(default_factory=list)
+    category_losses_db: Dict[str, Optional[float]] = Field(default_factory=dict)
+    design_margin_db: Optional[float] = None
+    total_design_allowance_db: Optional[float] = None
 
 
 OpticalBudgetResult.model_rebuild()

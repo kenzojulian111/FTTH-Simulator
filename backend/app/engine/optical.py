@@ -1828,7 +1828,7 @@ def calculate_optical_budget(
         scope_ids = set(node_ids) | cable_ids | component_ids
         return {
             key: value for key, value in path.parameter_sources.items()
-            if key == "txPowerDbm" or key.split(".", 1)[0] in scope_ids
+            if key in {"txPowerDbm", "safetyMarginDb"} or key.split(".", 1)[0] in scope_ids
         }
 
     def make_loss_breakdown(path: OpticalPathResult, prefix_node_ids: list[str], prefix_connection_ids: list[str]):
@@ -1966,6 +1966,20 @@ def calculate_optical_budget(
         }
         return rows, category_totals
 
+    # Attach the same ordered evaluator-backed rows to each ONT result. These
+    # rows are presentation data; existing loss, received-power and status
+    # calculations above remain authoritative and unchanged.
+    for path in paths:
+        path.loss_breakdown, path.category_losses_db = make_loss_breakdown(
+            path, path.node_ids, path.connection_ids
+        )
+        path.design_margin_db = (
+            detail_margin if (detail_margin := path.details.get("safetyMarginDb")) is not None else None
+        )
+        path.total_design_allowance_db = (
+            path.details.get("totalLossDb") if path.details else None
+        )
+
     for target in ((node for node in project.nodes if node.type in {NodeType.ODC, NodeType.ODP}) if _include_intermediate else []):
         reachable_paths = 0
         def count_routes(current_id: str, visited: set) -> None:
@@ -2043,6 +2057,9 @@ def calculate_optical_budget(
                     "length_m": probe_path.length_m, "accumulated_loss_db": probe_path.loss_db,
                     "estimated_power_dbm": probe_path.received_power_dbm,
                     "transmitter_power_dbm": probe_path.tx_power_dbm,
+                    "design_margin_db": config.safety_margin_db if _parameter_source(config, "safetyMarginDb") != "unknown" else None,
+                    "total_design_allowance_db": (round(probe_path.loss_db + config.safety_margin_db, 2)
+                        if probe_path.loss_db is not None and _parameter_source(config, "safetyMarginDb") != "unknown" else None),
                     "source_olt_name": nodes_by_id[probe_path.node_ids[0]].name if probe_path.node_ids and probe_path.node_ids[0] in nodes_by_id else None,
                     "loss_breakdown": probe_breakdown, "category_losses_db": probe_category_losses,
                     "parameter_sources": probe_sources,
@@ -2107,6 +2124,9 @@ def calculate_optical_budget(
             "node_ids": prefix_node_ids, "connection_ids": prefix_connection_ids,
             "length_m": length_m, "accumulated_loss_db": total_loss,
             "estimated_power_dbm": estimated_power, "transmitter_power_dbm": tx_power,
+            "design_margin_db": config.safety_margin_db if _parameter_source(config, "safetyMarginDb") != "unknown" else None,
+            "total_design_allowance_db": (round(total_loss + config.safety_margin_db, 2)
+                if total_loss is not None and _parameter_source(config, "safetyMarginDb") != "unknown" else None),
             "source_olt_name": nodes_by_id[path.node_ids[0]].name if path.node_ids and path.node_ids[0] in nodes_by_id else None,
             "loss_breakdown": loss_breakdown, "category_losses_db": category_losses,
             "parameter_sources": parameter_sources,

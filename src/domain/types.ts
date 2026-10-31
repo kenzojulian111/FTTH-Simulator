@@ -192,6 +192,8 @@ export interface OpticalBudgetResult {
     componentLosses?: Array<Record<string, unknown>>; standardLossDb?: number | null; standardVarianceDb?: number | null;
     datasheetReferences?: Array<Record<string, unknown>>; fieldMeasurements?: Array<Record<string, unknown>>;
     locationLossSummary?: Record<string, number | null>;
+    lossBreakdown?: OpticalLossBreakdownItem[]; categoryLossesDb?: Record<string, number | null>;
+    designMarginDb?: number | null; totalDesignAllowanceDb?: number | null;
   }>;
   intermediateNodes?: Array<{
     nodeId: string; nodeName: string; nodeType: "odc" | "odp";
@@ -199,16 +201,8 @@ export interface OpticalBudgetResult {
     sourceOltId?: string | null; nodeIds?: string[]; connectionIds?: string[];
     lengthM: number | null; accumulatedLossDb: number | null;
     estimatedPowerDbm: number | null; transmitterPowerDbm?: number | null; sourceOltName?: string | null;
-    lossBreakdown?: Array<{
-      componentId: string; component: string;
-      category: "fiber" | "connector" | "splice" | "splitter" | "passive_component";
-      position: string; quantity?: number | null; quantityUnit?: string | null;
-      calculationQuantity?: number | null; calculationQuantityUnit?: string | null;
-      unitLossDb?: number | null; unitLossUnit?: string | null;
-      totalLossDb: number | null; cumulativeLossDb: number | null; source?: string | null;
-      nodeId?: string | null; connectionId?: string | null; cableSegmentId?: string | null;
-      cableName?: string | null; cableCategory?: string | null; pathPosition: number;
-    }>;
+    designMarginDb?: number | null; totalDesignAllowanceDb?: number | null;
+    lossBreakdown?: OpticalLossBreakdownItem[];
     categoryLossesDb?: Record<string, number | null>;
     parameterSources?: Record<string, "configured" | "profile_default" | "legacy_fallback" | "unknown">;
     diagnostics?: string[];
@@ -216,6 +210,16 @@ export interface OpticalBudgetResult {
   disconnectedCustomerIds: string[];
   summary?: Record<string, unknown> | null;
   diagnostics?: Array<Record<string, unknown>>;
+}
+export interface OpticalLossBreakdownItem {
+  componentId: string; component: string;
+  category: "fiber" | "connector" | "splice" | "splitter" | "passive_component";
+  position: string; quantity?: number | null; quantityUnit?: string | null;
+  calculationQuantity?: number | null; calculationQuantityUnit?: string | null;
+  unitLossDb?: number | null; unitLossUnit?: string | null;
+  totalLossDb: number | null; cumulativeLossDb: number | null; source?: string | null;
+  nodeId?: string | null; connectionId?: string | null; cableSegmentId?: string | null;
+  cableName?: string | null; cableCategory?: string | null; pathPosition: number;
 }
 export interface ConstructionCostResult {
   projectId: string; calculatedAt: string; currency: string; totalAmount: number;

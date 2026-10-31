@@ -49,7 +49,6 @@ export function Inspector({ project, selection, opticalResult, onRename, onCusto
     {selected.kind === "node" && (selected.item.type === "odc" || selected.item.type === "odp") && (() => {
       const intermediate = opticalResult?.intermediateNodes?.find((entry) => entry.nodeId === selected.item.id);
       const display = (value: number | null | undefined, unit: string) => value == null || !Number.isFinite(value) ? "Unknown" : `${value.toFixed(2)} ${unit}`;
-      const lossCategories: Array<[string, string]> = [["fiber", "Fiber"], ["connector", "Connectors"], ["splice", "Splices"], ["splitter", "Splitters"], ["passive_component", "Other passive components"]];
       return <section className="splitter-config-panel" aria-label="Intermediate optical analysis">
         <div className="section-heading"><span>ESTIMATED PASSIVE-NODE POWER</span></div>
         {!opticalResult ? <p className="hint">Run Optical Analysis to calculate the directed OLT path.</p> : !intermediate ? <p className="hint">No intermediate result was returned for this node.</p> : <>
@@ -60,19 +59,10 @@ export function Inspector({ project, selection, opticalResult, onRename, onCusto
           <div className="property-row"><span>Accumulated loss</span><strong>{display(intermediate.accumulatedLossDb, "dB")}</strong></div>
           <div className="property-row"><span>Estimated optical power</span><strong>{display(intermediate.estimatedPowerDbm, "dBm")}</strong></div>
           <p className="hint">Loss entries show individual component loss and cumulative physical loss from the OLT. Safety margin is separate and is not subtracted from this estimated power.</p>
-          {intermediate.lossBreakdown && intermediate.lossBreakdown.length > 0 && <div className="report-table-wrap">
-            <table className="report-table" aria-label="Intermediate optical loss breakdown"><thead><tr><th>Component / position</th><th>Quantity / length</th><th>Configured attenuation</th><th>Component loss</th><th>Cumulative loss</th><th>Source</th></tr></thead><tbody>
-              {intermediate.lossBreakdown.map((row) => <tr key={`${row.componentId}-${row.pathPosition}`}>
-                <td>{row.component}<br /><small>{row.position}</small></td>
-                <td className="numeric">{row.quantity == null ? "Unknown" : `${row.quantity.toLocaleString()} ${row.quantityUnit ?? ""}`}{row.calculationQuantity != null && row.calculationQuantity !== row.quantity ? <small>Used in loss: {row.calculationQuantity.toLocaleString()} {row.calculationQuantityUnit ?? row.quantityUnit}</small> : null}</td>
-                <td className="numeric">{row.unitLossDb == null ? "Unknown" : `${display(row.unitLossDb, row.unitLossUnit ?? "dB")}`}</td>
-                <td className="numeric">{display(row.totalLossDb, "dB")}</td>
-                <td className="numeric">{display(row.cumulativeLossDb, "dB")}</td>
-                <td>{(row.source ?? "unknown").replace(/_/g, " ")}</td>
-              </tr>)}
-            </tbody></table>
-          </div>}
-          {intermediate.categoryLossesDb && <div className="property-grid">{lossCategories.map(([key, label]) => <div className="property-row" key={key}><span>{label}</span><strong>{display(intermediate.categoryLossesDb?.[key], "dB")}</strong></div>)}</div>}
+          <OpticalCalculationTable rows={intermediate.lossBreakdown ?? []} categoryLossesDb={intermediate.categoryLossesDb}
+            physicalLossDb={intermediate.accumulatedLossDb} designMarginDb={intermediate.designMarginDb}
+            totalDesignAllowanceDb={intermediate.totalDesignAllowanceDb} powerLabel="Estimated optical power at passive node"
+            powerDbm={intermediate.estimatedPowerDbm} />
           {Object.entries(intermediate.parameterSources ?? {}).length > 0 && <p className="hint">Input provenance: {Object.entries(intermediate.parameterSources ?? {}).map(([key, source]) => `${key} (${source.replace(/_/g, " ")})`).join(" · ")}</p>}
           {intermediate.diagnostics?.map((message, index) => <p className="hint" role="status" key={index}>{message}</p>)}
         </>}

@@ -2,6 +2,7 @@ import type { FeatureRef, NetworkNode, OpticalBudgetResult, OpticalDiagnosticIte
 import { detailNumber, detailString, formatReportDate, formatReportNumber } from "./reportFormat";
 import { ReportToolbar } from "./ReportNavigation";
 import { describeOpticalPath, opticalPathDisplayIssue, opticalPathDisplayStatus } from "../../domain/opticalPathDisplay";
+import { OpticalCalculationTable } from "../OpticalCalculationTable";
 
 interface Props {
   project: Project;
@@ -187,6 +188,10 @@ export function OpticalEngineeringReport({ project, result, loading, error, onBa
             const configuredLoss = node.properties.splitterLossDb;
             return <p key={node.id}><strong>{node.name}</strong>{ratio ? ` · ratio ${ratio}` : ""}{typeof configuredLoss === "number" ? ` · configured loss ${formatReportNumber(configuredLoss)} dB` : " · individual loss not returned; included in aggregate splitter loss"}</p>;
           })}</div>}
+          <OpticalCalculationTable rows={path.lossBreakdown ?? []} categoryLossesDb={path.categoryLossesDb}
+            physicalLossDb={path.lossDb} designMarginDb={path.designMarginDb ?? detailNumber(path.details, "safetyMarginDb")}
+            totalDesignAllowanceDb={path.totalDesignAllowanceDb ?? detailNumber(path.details, "totalLossDb")}
+            powerLabel="Received optical power (physical; design margin excluded)" powerDbm={path.receivedPowerDbm} />
           <div className="path-budget-grid">
             <div><span>Total route length</span><strong>{path.lengthM === null ? "—" : `${formatReportNumber(path.lengthM)} m`}</strong></div>
             <div><span>Total path loss</span><strong>{path.lossDb === null ? "—" : `${formatReportNumber(path.lossDb)} dB`}</strong></div>
@@ -198,7 +203,6 @@ export function OpticalEngineeringReport({ project, result, loading, error, onBa
             <div><span>Overload headroom</span><strong>{path.overloadMarginDb == null ? "—" : `${formatReportNumber(path.overloadMarginDb)} dB`}</strong></div>
             <div><span>Optical margin</span><strong>{path.marginDb === null ? "—" : `${formatReportNumber(path.marginDb)} dB`}</strong></div>
           </div>
-          <p className="component-loss-summary"><strong>Backend path loss breakdown:</strong> fiber {formatReportNumber(detailNumber(path.details, "fiberLossDb"))} dB · connectors {formatReportNumber(detailNumber(path.details, "connectorLossDb"))} dB · splices {formatReportNumber(detailNumber(path.details, "spliceLossDb"))} dB · splitters {formatReportNumber(detailNumber(path.details, "splitterLossDb"))} dB · safety margin {formatReportNumber(detailNumber(path.details, "safetyMarginDb"))} dB</p>
           <section className="splitter-summary"><h3>Project standard comparison</h3><p>Configured physical total: {formatReportNumber(path.lossDb)} dB · project/operator standard: {formatReportNumber(path.standardLossDb)} dB · variance (actual − standard): {formatReportNumber(path.standardVarianceDb)} dB</p><p>Datasheet and field measurement values below are references; neither replaces the configured calculation.</p></section>
           {(path.componentLosses?.length ?? 0) > 0 && <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Component</th><th>Location</th><th>Configured loss</th><th>Source</th></tr></thead><tbody>{path.componentLosses?.map((component, componentIndex) => <tr key={`${String(component.componentId ?? "component")}-${componentIndex}`}><td>{String(component.kind ?? "Component")} · {String(component.componentId ?? "")}</td><td>{String(component.location ?? "Unknown")}</td><td>{formatReportNumber(typeof component.lossDb === "number" ? component.lossDb : null)} dB</td><td>{String(component.source ?? "unknown")}</td></tr>)}</tbody></table></div>}
           {(path.locationLossSummary && Object.keys(path.locationLossSummary).length > 0) && <p className="component-loss-summary"><strong>Location subsets:</strong> {Object.entries(path.locationLossSummary).map(([locationName, loss]) => `${locationName} ${formatReportNumber(loss)} dB`).join(" · ")}. These are subsets of the physical total.</p>}
@@ -206,6 +210,20 @@ export function OpticalEngineeringReport({ project, result, loading, error, onBa
           {(path.fieldMeasurements?.length ?? 0) > 0 && <section className="splitter-summary"><h3>Field measurements</h3>{path.fieldMeasurements?.map((measurement, measurementIndex) => <p key={measurementIndex}>{String(measurement.componentId ?? "Component")} · {formatReportNumber(typeof measurement.lossDb === "number" ? measurement.lossDb : null)} dB · {String(measurement.measuredAt ?? "Date unknown")} · {String(measurement.method ?? "Method unknown")}</p>)}</section>}
         </section>;
       }) : <p className="report-state">The backend returned no per-ONT path records.</p>}
+      {(result.intermediateNodes?.length ?? 0) > 0 && <section className="intermediate-report-section">
+        <h2>ODC / ODP Optical Path Prefixes</h2>
+        {result.intermediateNodes?.map((node) => <section className="optical-path-card intermediate-path-card" key={node.nodeId}>
+          <header className="optical-path-heading"><div><p className="report-kicker">PASSIVE NODE PREFIX · {node.nodeType.toUpperCase()}</p><h2>{node.nodeName} ({node.nodeId})</h2></div><strong className={`report-status status-${node.status === "estimated" ? "pass" : "unknown"}`}>{node.status}</strong></header>
+          <p className="path-device-order"><strong>Topology position</strong><span>{(node.nodeIds ?? []).map((id) => nodeName(project, id)).join(" → ") || "No directed OLT prefix returned"}</span></p>
+          <p className="component-loss-summary"><strong>Originating OLT:</strong> {node.sourceOltName ?? node.sourceOltId ?? "Unknown"} · <strong>Launch power:</strong> {node.transmitterPowerDbm == null ? "Unknown" : `${formatReportNumber(node.transmitterPowerDbm)} dBm`} · <strong>Path length:</strong> {node.lengthM == null ? "Unknown" : `${formatReportNumber(node.lengthM)} m`}</p>
+          <OpticalCalculationTable rows={node.lossBreakdown ?? []} categoryLossesDb={node.categoryLossesDb}
+            physicalLossDb={node.accumulatedLossDb} designMarginDb={node.designMarginDb}
+            totalDesignAllowanceDb={node.totalDesignAllowanceDb} powerLabel="Estimated optical power at passive node (not a receiver measurement)"
+            powerDbm={node.estimatedPowerDbm} />
+          {(node.parameterSources && Object.keys(node.parameterSources).length > 0) && <p className="report-source-note">Input provenance: {Object.entries(node.parameterSources).map(([key, source]) => `${key}: ${source.replace(/_/g, " ")}`).join(" · ")}</p>}
+          {(node.diagnostics?.length ?? 0) > 0 && <div className="report-diagnostic configuration"><strong>Diagnostics</strong><ul>{node.diagnostics?.map((message, index) => <li key={index}>{message}</li>)}</ul></div>}
+        </section>)}
+      </section>}
       <section className="disconnected-section"><h2>Disconnected customers</h2>{result.disconnectedCustomerIds.length ? <ul>{result.disconnectedCustomerIds.map((id) => <li key={id}>{customerName(id)} <small>({id})</small></li>)}</ul> : <p>No disconnected customers were reported by the backend.</p>}</section>
       <p className="report-source-note">Engineering values and status are returned by the backend. Per-segment values are shown only when present in the corresponding backend link details; no missing loss values are estimated in this report.</p>
     </>}
