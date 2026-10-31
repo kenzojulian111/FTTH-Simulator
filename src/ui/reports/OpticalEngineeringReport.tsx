@@ -191,7 +191,8 @@ export function OpticalEngineeringReport({ project, result, loading, error, onBa
           <OpticalCalculationTable rows={path.lossBreakdown ?? []} categoryLossesDb={path.categoryLossesDb}
             physicalLossDb={path.lossDb} designMarginDb={path.designMarginDb ?? detailNumber(path.details, "safetyMarginDb")}
             totalDesignAllowanceDb={path.totalDesignAllowanceDb ?? detailNumber(path.details, "totalLossDb")}
-            powerLabel="Received optical power (physical; design margin excluded)" powerDbm={path.receivedPowerDbm} />
+            powerLabel="Received optical power (physical; design margin excluded)" powerDbm={path.receivedPowerDbm}
+            profileId={path.profileId} parameterSources={path.parameterSources} />
           <div className="path-budget-grid">
             <div><span>Total route length</span><strong>{path.lengthM === null ? "—" : `${formatReportNumber(path.lengthM)} m`}</strong></div>
             <div><span>Total path loss</span><strong>{path.lossDb === null ? "—" : `${formatReportNumber(path.lossDb)} dB`}</strong></div>
@@ -219,7 +220,7 @@ export function OpticalEngineeringReport({ project, result, loading, error, onBa
           <OpticalCalculationTable rows={node.lossBreakdown ?? []} categoryLossesDb={node.categoryLossesDb}
             physicalLossDb={node.accumulatedLossDb} designMarginDb={node.designMarginDb}
             totalDesignAllowanceDb={node.totalDesignAllowanceDb} powerLabel="Estimated optical power at passive node (not a receiver measurement)"
-            powerDbm={node.estimatedPowerDbm} />
+            powerDbm={node.estimatedPowerDbm} profileId={node.profileId} parameterSources={node.parameterSources} />
           {(node.parameterSources && Object.keys(node.parameterSources).length > 0) && <p className="report-source-note">Input provenance: {Object.entries(node.parameterSources).map(([key, source]) => `${key}: ${source.replace(/_/g, " ")}`).join(" · ")}</p>}
           {(node.diagnostics?.length ?? 0) > 0 && <div className="report-diagnostic configuration"><strong>Diagnostics</strong><ul>{node.diagnostics?.map((message, index) => <li key={index}>{message}</li>)}</ul></div>}
         </section>)}

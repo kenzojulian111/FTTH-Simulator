@@ -493,6 +493,8 @@ button:hover:not(:disabled){transition:background-color .15s,border-color .15s,c
   .intermediate-report-section{break-before:page;page-break-before:always}
   .intermediate-path-card{break-inside:auto;page-break-inside:auto}
   .intermediate-path-card .detailed-optical-calculation{break-inside:auto}
+  .optical-path-card{break-inside:auto;page-break-inside:auto}
+  .diagnostic-select-btn,.report-diagnostic button{display:none!important}
 }
 
 /* Explicit place search sits within the geographic map toolbar. */

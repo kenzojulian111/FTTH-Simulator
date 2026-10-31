@@ -6,6 +6,7 @@ import { RouterConfigurationPanel } from "./RouterConfigurationPanel";
 import type { RouterConfiguration } from "../domain/types";
 import { readRouterConfiguration } from "../domain/routerConfig";
 import { cableCategoryWarning, recommendCableCategory } from "../domain/cableClassification";
+import { OpticalCalculationTable } from "./OpticalCalculationTable";
 
 interface Props { project: Project; selection: FeatureRef | null; opticalResult?: OpticalBudgetResult | null; onAreaChange?: (area: ProjectArea) => void; onRename: (ref: FeatureRef, name: string) => void; onCustomerAddress: (id: string, address: string) => void; onCustomerOnt: (id: string, ontNodeId: string | null) => void; onCustomerStatus: (id: string, status: "planned" | "connected" | "on_hold") => void; onCableAttributes: (id: string, cableType: string, fiberCount: number | null, properties?: CableSegment["properties"]) => void; onRouterConfiguration: (id: string, configuration: RouterConfiguration) => void; onPoleProperties?: (id: string, properties: NetworkNode["properties"]) => void; onOpticalComponentsChange?: (components: OpticalComponent[]) => void; onAddPoleSpan?: (span: PoleSpan) => void; onDeletePoleSpan?: (id: string) => void; onPoleSpanStatus?: (id: string, status: PoleSpan["status"]) => void; onSplitterOpticalConfig?: (id: string, ratio: string | null, insertionLossDb: number | null) => void; onInvalidFiberCount: () => void; onDelete: () => void }
 
@@ -62,11 +63,21 @@ export function Inspector({ project, selection, opticalResult, onRename, onCusto
           <OpticalCalculationTable rows={intermediate.lossBreakdown ?? []} categoryLossesDb={intermediate.categoryLossesDb}
             physicalLossDb={intermediate.accumulatedLossDb} designMarginDb={intermediate.designMarginDb}
             totalDesignAllowanceDb={intermediate.totalDesignAllowanceDb} powerLabel="Estimated optical power at passive node"
-            powerDbm={intermediate.estimatedPowerDbm} />
+            powerDbm={intermediate.estimatedPowerDbm} profileId={intermediate.profileId} parameterSources={intermediate.parameterSources} />
           {Object.entries(intermediate.parameterSources ?? {}).length > 0 && <p className="hint">Input provenance: {Object.entries(intermediate.parameterSources ?? {}).map(([key, source]) => `${key} (${source.replace(/_/g, " ")})`).join(" · ")}</p>}
           {intermediate.diagnostics?.map((message, index) => <p className="hint" role="status" key={index}>{message}</p>)}
         </>}
       </section>;
+    })()}
+    {selected.kind === "node" && selected.item.type === "ont" && (() => {
+      const path = opticalResult?.paths.find((entry) => entry.ontNodeId === selected.item.id);
+      if (!path) return null;
+      const details = path.details ?? {};
+      const safetyMargin = typeof details.safetyMarginDb === "number" ? details.safetyMarginDb : path.designMarginDb;
+      const designAllowance = typeof details.totalLossDb === "number" ? details.totalLossDb : path.totalDesignAllowanceDb;
+      return <OpticalCalculationTable rows={path.lossBreakdown ?? []} categoryLossesDb={path.categoryLossesDb}
+        physicalLossDb={path.lossDb} designMarginDb={safetyMargin} totalDesignAllowanceDb={designAllowance}
+        powerLabel="Received optical power" powerDbm={path.receivedPowerDbm} profileId={path.profileId} parameterSources={path.parameterSources} />;
     })()}
     {location && <div className="property-row"><span>Coordinates</span><strong>{item.properties.geographicPositionSet === false ? "Place on map" : `${location[1].toFixed(5)}, ${location[0].toFixed(5)}`}</strong></div>}
     {selected.kind === "cable" && <><div className="property-row"><span>Endpoints</span><strong>{(() => { const connection = project.connections.find((entry) => entry.cableSegmentId === selected.item.id); const startId = connection?.fromNodeId ?? selected.item.startNodeId; const endId = connection?.toNodeId ?? selected.item.endNodeId; return `${project.nodes.find((node) => node.id === startId)?.name ?? "Unassigned"} → ${project.nodes.find((node) => node.id === endId)?.name ?? "Unassigned"}`; })()}</strong></div><div className="property-row"><span>Fiber cores</span><strong>{selected.item.fiberCount ?? "Unspecified"}</strong></div><div className="property-row"><span>Vertices</span><strong>{selected.item.geometry.coordinates.length}</strong></div><div className="property-row"><span>Calculated length</span><strong>{lengthM === null ? "Not calculated" : `${lengthM.toLocaleString()} m`}</strong></div><p className="hint">Drag the white handles to edit route geometry.</p></>}

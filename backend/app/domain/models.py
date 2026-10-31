@@ -863,10 +863,13 @@ class OpticalPathSegment(CamelModel):
     wavelength_nm: Optional[int] = None
     fiber_loss_db: Optional[float] = None
     connectors_count: Optional[int] = None
+    connector_unit_loss_db: Optional[float] = None
     connector_loss_db: Optional[float] = None
     splices_count: Optional[int] = None
+    splice_unit_loss_db: Optional[float] = None
     splice_loss_db: Optional[float] = None
     pigtail_splices_count: Optional[int] = None
+    pigtail_splice_unit_loss_db: Optional[float] = None
     pigtail_splice_loss_db: Optional[float] = None
     total_segment_loss_db: Optional[float] = None
 
@@ -887,6 +890,7 @@ class IntermediateOpticalResult(CamelModel):
     design_margin_db: Optional[float] = None
     total_design_allowance_db: Optional[float] = None
     source_olt_name: Optional[str] = None
+    profile_id: Optional[str] = None
     loss_breakdown: List["IntermediateOpticalLossItem"] = Field(default_factory=list)
     category_losses_db: Dict[str, Optional[float]] = Field(default_factory=dict)
     parameter_sources: Dict[str, Literal["configured", "profile_default", "legacy_fallback", "unknown"]] = Field(default_factory=dict)

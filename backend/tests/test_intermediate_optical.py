@@ -52,6 +52,10 @@ def test_olt_odc_odp_and_ont_use_the_same_physical_path_losses():
     fiber = next(row for row in odc.loss_breakdown if row.category == "fiber")
     assert (fiber.quantity, fiber.calculation_quantity, fiber.unit_loss_db, fiber.total_loss_db) == (1000, 1000, 0.4, 0.4)
     assert fiber.cumulative_loss_db == 0.4
+    connector = next(row for row in odc.loss_breakdown if row.category == "connector")
+    splice = next(row for row in odc.loss_breakdown if row.category == "splice")
+    assert (connector.quantity, connector.unit_loss_db, connector.total_loss_db) == (2, 0.2, 0.4)
+    assert (splice.quantity, splice.unit_loss_db, splice.total_loss_db) == (1, 0.1, 0.1)
     splitter = next(row for row in odc.loss_breakdown if row.category == "splitter")
     assert splitter.position == "At odc (topology node 2)"
     assert splitter.total_loss_db == 7.2
@@ -147,6 +151,42 @@ def test_intermediate_result_discloses_legacy_input_provenance():
     assert odc.parameter_sources["c1.fiberAttenuationDbPerKm"] == "legacy_fallback"
     assert any(row.source == "legacy_fallback" for row in odc.loss_breakdown if row.category == "fiber")
     assert any("provenance" in message.lower() for message in odc.diagnostics)
+
+
+def test_intermediate_passive_component_loss_is_counted_once_and_missing_value_stays_unknown():
+    project = _project()
+    project.optical_components = [OpticalComponent(
+        id="attenuator-1", kind="attenuator", node_id="odc", location="ODC",
+        configured_loss_db=0.3, configured_source="configured",
+    )]
+    result = calculate_optical_budget(project)
+    odc = next(item for item in result.intermediate_nodes if item.node_id == "odc")
+    assert odc.category_losses_db["passive_component"] == 0.3
+    assert odc.accumulated_loss_db == 8.4
+    assert next(row for row in odc.loss_breakdown if row.component_id == "attenuator-1").total_loss_db == 0.3
+
+    project.optical_components[0].configured_source = "unknown"
+    missing = calculate_optical_budget(project)
+    odc_missing = next(item for item in missing.intermediate_nodes if item.node_id == "odc")
+    assert odc_missing.category_losses_db["passive_component"] is None
+    assert odc_missing.accumulated_loss_db is None
+    assert odc_missing.estimated_power_dbm is None
+
+
+def test_breakdown_uses_evaluator_unit_losses_before_segment_rounding():
+    project = _project(with_splitters=False)
+    project.cable_segments[0].properties.update({
+        "connectorsCount": 3, "connectorLossDb": 0.125,
+        "splicesCount": 3, "spliceLossDb": 0.15,
+    })
+    result = calculate_optical_budget(project)
+    odc = next(item for item in result.intermediate_nodes if item.node_id == "odc")
+    connector = next(row for row in odc.loss_breakdown if row.category == "connector")
+    splice = next(row for row in odc.loss_breakdown if row.category == "splice")
+    assert connector.unit_loss_db == 0.125
+    assert connector.total_loss_db == 0.38
+    assert splice.unit_loss_db == 0.15
+    assert splice.total_loss_db == 0.45
 
 
 def test_multiple_olt_routes_to_a_passive_node_are_reported_ambiguous():

@@ -1123,10 +1123,13 @@ def calculate_optical_budget(
                     wavelength_nm=wavelength_nm,
                     fiber_loss_db=seg_fiber_loss,
                     connectors_count=connectors,
+                    connector_unit_loss_db=connector_unit_loss,
                     connector_loss_db=seg_connector_loss,
                     splices_count=splices,
+                    splice_unit_loss_db=splice_unit_loss,
                     splice_loss_db=seg_splice_loss,
                     pigtail_splices_count=pigtail_splices if pigtail_splices and pigtail_splices > 0 else None,
+                    pigtail_splice_unit_loss_db=pigtail_unit_loss if pigtail_splices and pigtail_splices > 0 else None,
                     pigtail_splice_loss_db=seg_pigtail_splice_loss if pigtail_splices and pigtail_splices > 0 else None,
                     total_segment_loss_db=seg_total_loss,
                 )
@@ -1908,7 +1911,7 @@ def calculate_optical_budget(
                 source=segment_source, connection_id=segment.connection_id, cable_segment_id=segment.cable_segment_id,
                 cable_name=segment.cable_name, cable_category=cable_category, path_position=index,
             )
-            connector_unit = segment.connector_loss_db / segment.connectors_count if segment.connectors_count and segment.connector_loss_db is not None else None
+            connector_unit = segment.connector_unit_loss_db
             append_row(
                 component_id=f"{segment.connection_id}:connectors", component=f"Connectors · {segment.cable_name} ({segment.cable_segment_id})",
                 category="connector", position=position, quantity=segment.connectors_count, quantity_unit="connector",
@@ -1924,7 +1927,7 @@ def calculate_optical_budget(
                 if segment.splice_loss_db is not None and segment.pigtail_splices_count and segment.pigtail_splice_loss_db is not None
                 else segment.splice_loss_db if not segment.pigtail_splices_count else None
             )
-            route_splice_unit = route_splice_total / route_splice_count if route_splice_count and route_splice_total is not None else None
+            route_splice_unit = segment.splice_unit_loss_db
             append_row(
                 component_id=f"{segment.connection_id}:splices", component=f"Splices · {segment.cable_name} ({segment.cable_segment_id})",
                 category="splice", position=position, quantity=route_splice_count, quantity_unit="splice",
@@ -1938,7 +1941,7 @@ def calculate_optical_budget(
                 append_row(
                     component_id=f"{segment.connection_id}:pigtail-splices", component=f"Pigtail splices · {segment.cable_name} ({segment.cable_segment_id})",
                     category="splice", position=position, quantity=segment.pigtail_splices_count, quantity_unit="splice",
-                    unit_loss_db=segment.pigtail_splice_loss_db / segment.pigtail_splices_count if segment.pigtail_splice_loss_db is not None else None,
+                    unit_loss_db=segment.pigtail_splice_unit_loss_db,
                     unit_loss_unit="dB/splice", total_loss_db=segment.pigtail_splice_loss_db,
                     source=path.parameter_sources.get(f"{segment.cable_segment_id}.pigtailSpliceLossDb", "unknown"),
                     connection_id=segment.connection_id, cable_segment_id=segment.cable_segment_id,
@@ -1973,12 +1976,9 @@ def calculate_optical_budget(
         path.loss_breakdown, path.category_losses_db = make_loss_breakdown(
             path, path.node_ids, path.connection_ids
         )
-        path.design_margin_db = (
-            detail_margin if (detail_margin := path.details.get("safetyMarginDb")) is not None else None
-        )
-        path.total_design_allowance_db = (
-            path.details.get("totalLossDb") if path.details else None
-        )
+        path_details = path.details or {}
+        path.design_margin_db = path_details.get("safetyMarginDb")
+        path.total_design_allowance_db = path_details.get("totalLossDb")
 
     for target in ((node for node in project.nodes if node.type in {NodeType.ODC, NodeType.ODP}) if _include_intermediate else []):
         reachable_paths = 0
@@ -2061,6 +2061,7 @@ def calculate_optical_budget(
                     "total_design_allowance_db": (round(probe_path.loss_db + config.safety_margin_db, 2)
                         if probe_path.loss_db is not None and _parameter_source(config, "safetyMarginDb") != "unknown" else None),
                     "source_olt_name": nodes_by_id[probe_path.node_ids[0]].name if probe_path.node_ids and probe_path.node_ids[0] in nodes_by_id else None,
+                    "profile_id": config.profile_id,
                     "loss_breakdown": probe_breakdown, "category_losses_db": probe_category_losses,
                     "parameter_sources": probe_sources,
                     "diagnostics": probe_diagnostics,
@@ -2128,6 +2129,7 @@ def calculate_optical_budget(
             "total_design_allowance_db": (round(total_loss + config.safety_margin_db, 2)
                 if total_loss is not None and _parameter_source(config, "safetyMarginDb") != "unknown" else None),
             "source_olt_name": nodes_by_id[path.node_ids[0]].name if path.node_ids and path.node_ids[0] in nodes_by_id else None,
+            "profile_id": config.profile_id,
             "loss_breakdown": loss_breakdown, "category_losses_db": category_losses,
             "parameter_sources": parameter_sources,
             "diagnostics": diagnostics,

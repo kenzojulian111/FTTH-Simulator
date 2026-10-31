@@ -120,9 +120,25 @@ describe("engineering reports", () => {
     expect(view.textContent).toContain("Received power");
     expect(view.textContent).toContain("dBm");
     expect(view.textContent).toContain("12.2 dB");
-    expect(view.textContent).toContain("splitters 8 dB");
+    expect(view.textContent).toContain("Physical attenuation subtotal (margin excluded)");
+    expect(view.textContent).toContain("Total design attenuation allowance");
     expect(view.textContent).toContain("Customer One");
     expect(view.textContent).toContain("customer-offline");
+  });
+
+  it("renders the same backend calculation rows and passive prefixes in report output", () => {
+    const path = {
+      ...opticalResult.paths[0],
+      lossBreakdown: [{ componentId: "cable:fiber:link", component: "Fiber attenuation · Feeder 01 (cable) · feeder", category: "fiber" as const, position: "OLT A → ONT A (hop 1)", quantity: 200, quantityUnit: "m", calculationQuantity: 200, calculationQuantityUnit: "m", unitLossDb: 0.4, unitLossUnit: "dB/km", totalLossDb: 0.08, cumulativeLossDb: 0.08, source: "configured", cableName: "Feeder 01", cableCategory: "feeder", pathPosition: 0 }],
+      categoryLossesDb: { fiber: 0.08, connector: 0.5, splice: 0.22, splitter: 8, passive_component: 0 },
+      designMarginDb: 2, totalDesignAllowanceDb: 11.6,
+    };
+    const view = render(<OpticalEngineeringReport project={projectFixture()} result={{ ...opticalResult, paths: [path], intermediateNodes: [{ nodeId: "odc", nodeName: "ODC A", nodeType: "odc", status: "unknown", nodeIds: ["olt", "odc"], connectionIds: ["link"], lengthM: 200, accumulatedLossDb: 8.58, estimatedPowerDbm: -8.58, transmitterPowerDbm: 0, designMarginDb: 2, totalDesignAllowanceDb: 10.58, lossBreakdown: path.lossBreakdown, categoryLossesDb: path.categoryLossesDb, diagnostics: ["Legacy fallback input"] }] }} loading={false} error={null} onBack={() => undefined} />);
+    expect(view.textContent).toContain("Detailed Optical Link Budget Calculation");
+    expect(view.textContent).toContain("0.2 km × 0.4 dB/km = 0.08 dB");
+    expect(view.textContent).toContain("ODC A (odc)");
+    expect(view.textContent).toContain("Legacy fallback input");
+    expect(view.textContent).toContain("not a receiver measurement");
   });
 
   it("renders independent route lengths and optical values for each ONT", () => {

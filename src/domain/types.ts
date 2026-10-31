@@ -184,8 +184,8 @@ export interface OpticalBudgetResult {
       toNodeId: string; toNodeName: string; toNodeType: string;
       lengthM: number; routeLengthContributionM?: number | null; attenuationDbPerKm: number | null; fiberLossDb: number | null;
       fiberType?: string | null; wavelengthNm?: number | null;
-      connectorsCount: number | null; connectorLossDb: number | null; splicesCount: number | null;
-      spliceLossDb: number | null; totalSegmentLossDb: number | null;
+      connectorsCount: number | null; connectorUnitLossDb?: number | null; connectorLossDb: number | null; splicesCount: number | null;
+      spliceUnitLossDb?: number | null; spliceLossDb: number | null; pigtailSpliceUnitLossDb?: number | null; totalSegmentLossDb: number | null;
     }>;
     splitters?: Array<{ nodeId: string; nodeName: string; nodeType: string; splitterRatio?: string | null; lossDb: number | null; idealLossDb?: number | null }>;
     details?: Record<string, unknown> | null;
@@ -200,7 +200,7 @@ export interface OpticalBudgetResult {
     status: "estimated" | "unknown" | "ambiguous" | "unreachable";
     sourceOltId?: string | null; nodeIds?: string[]; connectionIds?: string[];
     lengthM: number | null; accumulatedLossDb: number | null;
-    estimatedPowerDbm: number | null; transmitterPowerDbm?: number | null; sourceOltName?: string | null;
+    estimatedPowerDbm: number | null; transmitterPowerDbm?: number | null; sourceOltName?: string | null; profileId?: string | null;
     designMarginDb?: number | null; totalDesignAllowanceDb?: number | null;
     lossBreakdown?: OpticalLossBreakdownItem[];
     categoryLossesDb?: Record<string, number | null>;
