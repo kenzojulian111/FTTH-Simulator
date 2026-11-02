@@ -1,4 +1,4 @@
-import type { CableSegment, Coordinate, Customer, FeatureRef, NetworkNode, OpticalBudgetConfig, PoleSpan, Project, ProjectArea, ProjectSettings, RouterConfiguration } from "../domain/types";
+import type { CableSegment, Coordinate, Customer, FeatureProperties, FeatureRef, NetworkNode, OpticalBudgetConfig, PoleSpan, Project, ProjectArea, ProjectSettings, RouterConfiguration } from "../domain/types";
 import { approximateLengthMeters, extractSubspanCoordinates } from "../domain/project";
 import { setLogicalPosition } from "../domain/layout";
 import { createValidatedConnection } from "../domain/connectionValidation";
@@ -36,6 +36,10 @@ export type EditorAction =
   | { type: "router-configuration"; id: string; configuration: RouterConfiguration }
   | { type: "optical-budget-config"; config: OpticalBudgetConfig }
   | { type: "splitter-optical-config"; id: string; ratio: string | null; insertionLossDb: number | null }
+  | { type: "node-properties"; id: string; properties: Partial<NetworkNode["properties"]> }
+  | { type: "update-connection-ports"; id: string; fromPortId?: string | null; toPortId?: string | null }
+  | { type: "add-internal-splitter"; hostNodeId: string; splitter: NetworkNode }
+  | { type: "remove-internal-splitter"; splitterId: string }
   | { type: "delete"; ref: FeatureRef }
   | { type: "project-name"; name: string }
   | { type: "saved"; project: Project; expectedRevision?: number; expectedGeneration?: number };
@@ -181,6 +185,47 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "router-configuration": return markEdited(state, { project: { ...project, nodes: project.nodes.map((node) => node.id === action.id && node.type === "router" ? { ...node, properties: { ...node.properties, routerConfiguration: serializeRouterConfiguration(action.configuration) }, updatedAt } : node) } });
     case "optical-budget-config": return markEdited(state, { project: { ...project, settings: { ...project.settings, opticalBudget: action.config } } });
     case "splitter-optical-config": return markEdited(state, { project: { ...project, nodes: project.nodes.map((node) => node.id === action.id && (node.type === "splitter" || node.properties.splitterRatio !== undefined || node.properties.splitterLossDb !== undefined) ? { ...node, properties: { ...node.properties, splitterRatio: action.ratio, splitterLossDb: action.insertionLossDb }, updatedAt } : node) } });
+    case "node-properties":
+      return markEdited(state, {
+        project: {
+          ...project,
+          nodes: project.nodes.map((node) =>
+            node.id === action.id ? { ...node, properties: { ...node.properties, ...action.properties } as FeatureProperties, updatedAt } : node,
+          ),
+        },
+      });
+    case "update-connection-ports":
+      return markEdited(state, {
+        project: {
+          ...project,
+          connections: project.connections.map((conn) =>
+            conn.id === action.id
+              ? {
+                  ...conn,
+                  fromPortId: action.fromPortId !== undefined ? action.fromPortId : conn.fromPortId,
+                  toPortId: action.toPortId !== undefined ? action.toPortId : conn.toPortId,
+                }
+              : conn,
+          ),
+        },
+      });
+    case "add-internal-splitter":
+      return markEdited(state, {
+        project: {
+          ...project,
+          nodes: [...project.nodes, action.splitter],
+        },
+      });
+    case "remove-internal-splitter":
+      return markEdited(state, {
+        project: {
+          ...project,
+          nodes: project.nodes.filter((node) => node.id !== action.splitterId),
+          connections: project.connections.filter(
+            (conn) => conn.fromNodeId !== action.splitterId && conn.toNodeId !== action.splitterId,
+          ),
+        },
+      });
     case "rename": {
       const { ref, name } = action;
       if (ref.kind === "node") return markEdited(state, { project: { ...project, nodes: project.nodes.map((x) => x.id === ref.id ? { ...x, name, updatedAt } : x) } });

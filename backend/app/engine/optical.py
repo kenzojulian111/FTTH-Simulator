@@ -68,6 +68,33 @@ def _legacy_or_unknown_sources(sources: Dict[str, str]) -> List[str]:
     return [name for name, source in sources.items() if source in {"legacy_fallback", "unknown"}]
 
 
+def _resolve_physical_route_status(cables: List) -> str:
+    """Resolve physical route status ('planned', 'unverified', or 'verified') across a path's cables."""
+    if not cables:
+        return "unverified"
+    has_unverified = False
+    all_verified = True
+    for cable in cables:
+        props = cable.properties or {}
+        route_status = props.get("routeStatus")
+        if (
+            route_status in {"map_candidate_unverified", "existing_geometry_unverified", "manual_required"}
+            or props.get("routeFieldVerificationRequired") is True
+            or not cable.geometry.coordinates
+        ):
+            has_unverified = True
+            all_verified = False
+        elif route_status == "verified" or props.get("routeVerified") is True:
+            pass
+        else:
+            all_verified = False
+    if has_unverified:
+        return "unverified"
+    if all_verified:
+        return "verified"
+    return "planned"
+
+
 def _resolve_cable_category(cable) -> Optional[str]:
     explicit = cable.properties.get("cableCategory")
     if isinstance(explicit, str) and explicit.strip():
@@ -200,10 +227,16 @@ def calculate_optical_budget(
             continue
 
         # 2. Determine link length
-        if cable.length_m is not None:
+        if cable.properties.get("routeStatus") == "manual_required" and not cable.geometry.coordinates:
+            length_m = None
+        elif cable.length_m is not None:
             length_m = float(cable.length_m)
         else:
             length_m = round(calculate_route_length(cable.geometry.coordinates), 2)
+        if length_m is None:
+            link_results.append(OpticalLinkResult(connection_id=conn.id, length_m=None, loss_db=None, received_power_dbm=None, status="unknown", margin_db=None, details={"error": "Cable route requires manual planning; length and physical loss are unknown", "routeStatus": "manual_required"}))
+            unknown_count += 1
+            continue
         length_km = length_m / 1000.0
 
         # Check if endpoints are optical devices (not pure physical poles)
@@ -308,9 +341,10 @@ def calculate_optical_budget(
             or "txPowerDbm" in from_node.properties
         )
 
-        if not is_from_transmitter:
+        if not is_from_transmitter or to_node.type != NodeType.ONT:
             # Passive nodes (ODC, ODP, Splitter) are NOT transmitters.
             # Never assign fictitious transmitter launch power.
+            estimated_passive_power = round(float(from_node.properties.get("txPowerDbm", config.tx_power_dbm)) - physical_loss, 2) if is_from_transmitter else None
             details = {
                 "lengthKm": round(length_km, 4),
                 "fiberLossDb": round(fiber_loss, 2),
@@ -323,8 +357,10 @@ def calculate_optical_budget(
                 "physicalLossDb": physical_loss,
                 "safetyMarginDb": round(config.safety_margin_db, 2),
                 "totalLossDb": total_loss_budget,
-                "txPowerDbm": None,
-                "note": f"Passive source node '{from_node.name}' ({from_node.type.value}) is not an optical transmitter; end-to-end power levels are evaluated in paths",
+                "txPowerDbm": float(from_node.properties.get("txPowerDbm", config.tx_power_dbm)) if is_from_transmitter else None,
+                "estimatedOpticalPowerDbm": estimated_passive_power,
+                "receiverEvaluation": "not_applicable" if to_node.type != NodeType.ONT else "end_to_end_path_only",
+                "note": (f"Passive source node '{from_node.name}' ({from_node.type.value}) is not an optical transmitter; end-to-end power levels are evaluated in paths" if not is_from_transmitter else f"Estimated optical power at passive destination '{to_node.name}' ({to_node.type.value}); receiver sensitivity and overload are not evaluated at passive nodes"),
             }
             link_results.append(
                 OpticalLinkResult(
@@ -418,13 +454,15 @@ def calculate_optical_budget(
             )
         )
 
+    known_link_losses = [link.loss_db for link in link_results if link.loss_db is not None]
+    known_link_margins = [link.margin_db for link in link_results if link.margin_db is not None]
     summary = {
         "totalLinks": len(link_results),
         "passed": passed_count,
         "failed": failed_count,
         "unknown": unknown_count,
-        "maxLossDb": max((l.loss_db for l in link_results), default=0.0),
-        "minMarginDb": min((l.margin_db for l in link_results if l.margin_db is not None), default=0.0),
+        "maxLossDb": max(known_link_losses) if known_link_losses else None,
+        "minMarginDb": min(known_link_margins) if known_link_margins else None,
     }
 
     # Edge results above are useful diagnostics, but they are not an end-to-end
@@ -652,12 +690,27 @@ def calculate_optical_budget(
         path_diagnostics: List[OpticalDiagnostic] = []
         calculation_limitations: List[str] = []
         has_invalid_configuration = False
+        has_unverified_physical_route = False
+        has_unverified_equipment = False
+        has_unmeasured_internal_jumper = False
 
         for connection in path_connections:
             cable = cables_by_id[connection.cable_segment_id]
             cable_segment_ids.append(cable.id)
             from_n = nodes_by_id[connection.from_node_id]
             to_n = nodes_by_id[connection.to_node_id]
+
+            route_status = cable.properties.get("routeStatus")
+            if route_status in {"map_candidate_unverified", "existing_geometry_unverified"}:
+                has_unverified_physical_route = True
+                path_diagnostics.append(OpticalDiagnostic(code="ROUTE_FIELD_VERIFICATION_REQUIRED", severity="warning", category="physical_deployment", message=f"Cable '{cable.name}' has a {route_status.replace('_', ' ')}; the mapped line is not a field-confirmed fiber route or deployment method.", affected_entity_type="cable", affected_entity_id=cable.id, affected_entity_name=cable.name, actual_value=cable.length_m, expected_value="field-verified route geometry and deployment method", unit="m", corrective_action="Field-walk the route, confirm access/right-of-way and deployment method, then verify or edit the cable geometry.", data_source=route_status))
+                calculation_limitations.append(f"Physical route and deployment method are unverified for '{cable.name}'.")
+
+            required_cores = cable.properties.get("requiredFiberCores")
+            if required_cores is not None and cable.fiber_count is None:
+                has_unverified_equipment = True
+                path_diagnostics.append(OpticalDiagnostic(code="FEEDER_CORE_CAPACITY_UNKNOWN", severity="warning", category="configuration", message=f"Cable '{cable.name}' must carry {required_cores} feeder fibers for the assigned PON branches, but its fiber count is not recorded.", affected_entity_type="cable", affected_entity_id=cable.id, affected_entity_name=cable.name, actual_value=None, expected_value=required_cores, unit="fibers", corrective_action="Confirm the existing feeder cable core count and reserve two independent fibers for the two PON branches.", data_source="unknown"))
+                calculation_limitations.append(f"Feeder fiber-core capacity is unverified for '{cable.name}'.")
 
             raw_length_m = cable.properties.get("lengthM", cable.length_m)
             length_m: Optional[float] = None
@@ -704,23 +757,53 @@ def calculate_optical_budget(
             else:
                 geo_len = round(calculate_route_length(cable.geometry.coordinates), 2) if cable.geometry and len(cable.geometry.coordinates) >= 2 else 0.0
                 if geo_len <= 0.0:
+                    manual_route = cable.properties.get("routeStatus") == "manual_required"
+                    internal_jumper = cable.properties.get("connectionKind") == "internal_optical_jumper"
+                    if internal_jumper:
+                        has_unmeasured_internal_jumper = True
+                    diagnostic_code = (
+                        "INTERNAL_JUMPER_LENGTH_UNKNOWN"
+                        if internal_jumper
+                        else "MANUAL_ROUTE_REQUIRED"
+                        if manual_route
+                        else "CABLE_LENGTH_UNKNOWN"
+                    )
+                    if internal_jumper:
+                        diagnostic_message = (
+                            f"Internal optical jumper '{cable.name}' ({cable.id}) connects co-located equipment, "
+                            "but its physical fiber length is not recorded; coincident node coordinates do not establish jumper length."
+                        )
+                        corrective_action = "Record the specified or measured internal jumper length, or model the splitter as an integrated optical component if no jumper is installed."
+                        data_source = "internal_jumper_length_unverified"
+                    elif manual_route:
+                        diagnostic_message = f"Cable '{cable.name}' ({cable.id}) requires manual route planning; no route length is asserted."
+                        corrective_action = "Plan and survey a valid route, then record its route geometry and measured or calculated length."
+                        data_source = "manual_required"
+                    else:
+                        diagnostic_message = f"Route length for cable '{cable.name}' ({cable.id}) is unknown (zero-length geometry and no explicit lengthM)."
+                        corrective_action = "Plan and survey a valid route, then record its route geometry and measured or calculated length."
+                        data_source = "unknown"
                     path_diagnostics.append(
                         OpticalDiagnostic(
-                            code="CABLE_LENGTH_UNKNOWN",
+                            code=diagnostic_code,
                             severity="warning",
                             category="configuration",
-                            message=f"Route length for cable '{cable.name}' ({cable.id}) is unknown (zero-length geometry and no explicit lengthM).",
+                            message=diagnostic_message,
                             affected_entity_type="cable",
                             affected_entity_id=cable.id,
                             affected_entity_name=cable.name,
                             actual_value=None,
                             expected_value=None,
                             unit="m",
-                            corrective_action="Specify an explicit cable route length (m) or draw non-zero route geometry on the map.",
-                            data_source="unknown",
+                            corrective_action=corrective_action,
+                            data_source=data_source,
                         )
                     )
-                    calculation_limitations.append(f"Route length for cable '{cable.name}' ({cable.id}) is unknown.")
+                    calculation_limitations.append(
+                        f"Physical fiber length for internal jumper '{cable.name}' is unknown."
+                        if internal_jumper
+                        else f"Route length for cable '{cable.name}' ({cable.id}) is unknown."
+                    )
                     length_m = None
                 else:
                     length_m = geo_len
@@ -1116,7 +1199,7 @@ def calculate_optical_budget(
                     to_node_id=to_n.id,
                     to_node_name=to_n.name,
                     to_node_type=to_n.type.value,
-                    length_m=round(length_m, 2) if length_m is not None else 0.0,
+                    length_m=round(length_m, 2) if length_m is not None else None,
                     route_length_contribution_m=round(route_length_contribution_m, 2) if route_length_contribution_m is not None else None,
                     attenuation_db_per_km=alpha,
                     fiber_type=fiber_type,
@@ -1140,10 +1223,44 @@ def calculate_optical_budget(
         has_unconfigured_splitter = False
         unconfigured_splitter_names = []
 
-        for node_id in path_node_ids:
+        path_pon_port_id = ont.properties.get("plannedPonPortId")
+        if not path_pon_port_id:
+            path_pon_port_id = next((customer.properties.get("plannedPonPortId") for customer in project.customers if customer.ont_node_id == ont.id and customer.properties.get("plannedPonPortId")), None)
+        path_nodes_with_mounted_splitters: List[str] = []
+        for host_node_id in path_node_ids:
+            hosted = [
+                candidate for candidate in project.nodes
+                if candidate.type == NodeType.SPLITTER
+                and candidate.properties.get("mountedInNodeId") == host_node_id
+            ]
+            valid_hosted = []
+            for candidate in hosted:
+                assigned_pon_port = candidate.properties.get("ponPortId")
+                if assigned_pon_port:
+                    if not path_pon_port_id:
+                        has_unconfigured_splitter = True
+                        path_diagnostics.append(OpticalDiagnostic(code="SPLITTER_PON_ASSIGNMENT_UNKNOWN", severity="warning", category="configuration", message=f"Mounted splitter '{candidate.name}' is assigned to PON port '{assigned_pon_port}', but this ONT has no PON-port assignment.", affected_entity_type="node", affected_entity_id=candidate.id, affected_entity_name=candidate.name, expected_value="customer/ONT PON-port assignment matching the mounted feeder splitter", unit="PON port", corrective_action="Assign the ONT to its intended feeder PON port and verify the corresponding OLT port.", data_source="unknown"))
+                        continue
+                    if assigned_pon_port != path_pon_port_id:
+                        continue
+                valid_hosted.append(candidate.id)
+            if valid_hosted:
+                path_nodes_with_mounted_splitters.extend(valid_hosted)
+            else:
+                path_nodes_with_mounted_splitters.append(host_node_id)
+
+        for node_id in path_nodes_with_mounted_splitters:
             if node_id in seen_splitter_node_ids:
                 continue
             splitter = nodes_by_id[node_id]
+            if splitter.type == NodeType.ODC and splitter.properties.get("distributionFanoutCapacityStatus") == "unknown":
+                has_unverified_equipment = True
+                path_diagnostics.append(OpticalDiagnostic(code="ODC_FANOUT_CAPACITY_UNKNOWN", severity="warning", category="configuration", message=f"ODC '{splitter.name}' requires {splitter.properties.get('distributionFanoutPortsRequired')} distribution outputs, but its rated port capacity is not recorded.", affected_entity_type="node", affected_entity_id=splitter.id, affected_entity_name=splitter.name, actual_value=splitter.properties.get("distributionFanoutPortsRequired"), expected_value="verified ODC distribution-port capacity", unit="ports", corrective_action="Confirm the cabinet adapter/port capacity and document the installed distribution architecture.", data_source="unknown"))
+                calculation_limitations.append(f"ODC distribution port capacity is unknown for '{splitter.name}'.")
+            if splitter.type == NodeType.OLT and splitter.properties.get("ponPortArchitectureStatus") == "unknown":
+                has_unverified_equipment = True
+                path_diagnostics.append(OpticalDiagnostic(code="OLT_PON_CAPACITY_UNKNOWN", severity="warning", category="configuration", message=f"OLT '{splitter.name}' has no recorded PON port architecture or port capacity for this distribution design.", affected_entity_type="node", affected_entity_id=splitter.id, affected_entity_name=splitter.name, actual_value=None, expected_value="verified OLT PON port count and optical architecture", unit="ports", corrective_action="Confirm OLT model, PON port allocation, and the approved split architecture.", data_source="unknown"))
+                calculation_limitations.append(f"OLT PON port capacity and architecture are unknown for '{splitter.name}'.")
             raw_spl_loss = splitter.properties.get("splitterLossDb")
             if raw_spl_loss is not None:
                 parsed_spl_loss, valid_spl_loss = _safe_float(raw_spl_loss)
@@ -1183,6 +1300,14 @@ def calculate_optical_budget(
                     splitter_source = "unknown"
                 path_parameter_sources[f"{node_id}.splitterLossDb"] = splitter_source
                 path_parameter_sources[f"{node_id}.splitterRatio"] = "configured" if ratio_is_configured else "unknown"
+                if splitter.properties.get("splitterSpecificationStatus") == "profile_assumption_unverified":
+                    has_unverified_equipment = True
+                    path_diagnostics.append(OpticalDiagnostic(code="SPLITTER_SPEC_UNVERIFIED", severity="warning", category="configuration", message=f"Splitter '{splitter.name}' uses a profile-based design assumption that is not verified against installed equipment or a datasheet.", affected_entity_type="node", affected_entity_id=splitter.id, affected_entity_name=splitter.name, actual_value=splitter.properties.get("splitterRatio"), expected_value="verified equipment ratio and insertion-loss datasheet", unit="dB", corrective_action="Confirm the specified splitter and its insertion loss from the selected equipment datasheet before construction.", data_source="profile_default"))
+                    calculation_limitations.append(f"Splitter equipment specification is unverified for '{splitter.name}'.")
+                if not ratio_is_configured:
+                    has_unconfigured_splitter = True
+                    path_diagnostics.append(OpticalDiagnostic(code="SPLITTER_RATIO_UNKNOWN", severity="warning", category="configuration", message=f"Splitter '{splitter.name}' has no configured splitter ratio; connected outputs cannot be checked against its port capacity.", affected_entity_type="node", affected_entity_id=splitter.id, affected_entity_name=splitter.name, actual_value=None, expected_value="configured splitter ratio and output capacity", unit="ports", corrective_action="Confirm the legacy splitter model and record its ratio and rated output capacity.", data_source="unknown"))
+                    calculation_limitations.append(f"Splitter ratio and output capacity are unknown for '{splitter.name}'.")
                 if s_info.loss_db is None or splitter_source == "unknown":
                     has_unconfigured_splitter = True
                     unconfigured_splitter_names.append(f"{s_info.node_name} ({s_info.splitter_ratio})")
@@ -1278,6 +1403,14 @@ def calculate_optical_budget(
         tx_override = root_olt.properties.get("txPowerDbm")
         sensitivity_override = ont.properties.get("rxSensitivityDbm")
         overload_override = ont.properties.get("rxOverloadDbm")
+        if root_olt.properties.get("opticalEquipmentStatus") == "model_unverified":
+            has_unverified_equipment = True
+            path_diagnostics.append(OpticalDiagnostic(code="OLT_EQUIPMENT_UNVERIFIED", severity="warning", category="configuration", message=f"OLT '{root_olt.name}' has no verified equipment model/datasheet; transmitter specifications are using the project optical profile.", affected_entity_type="node", affected_entity_id=root_olt.id, affected_entity_name=root_olt.name, expected_value="verified OLT model and optical datasheet", data_source="profile_default"))
+            calculation_limitations.append(f"OLT transmit specifications are unverified for '{root_olt.name}'.")
+        if ont.properties.get("opticalEquipmentStatus") == "model_unverified":
+            has_unverified_equipment = True
+            path_diagnostics.append(OpticalDiagnostic(code="ONT_EQUIPMENT_UNVERIFIED", severity="warning", category="configuration", message=f"ONT '{ont.name}' has no verified equipment model/datasheet; receiver specifications are using the project optical profile.", affected_entity_type="node", affected_entity_id=ont.id, affected_entity_name=ont.name, expected_value="verified ONT model with sensitivity and overload specifications", data_source="profile_default"))
+            calculation_limitations.append(f"ONT receiver specifications are unverified for '{ont.name}'.")
         path_parameter_sources["txPowerDbm"] = _parameter_source(config, "txPowerDbm", tx_override is not None)
         path_parameter_sources["rxSensitivityDbm"] = _parameter_source(config, "rxSensitivityDbm", sensitivity_override is not None)
         path_parameter_sources["rxOverloadDbm"] = _parameter_source(config, "rxOverloadDbm", overload_override is not None)
@@ -1602,8 +1735,10 @@ def calculate_optical_budget(
         ]
 
         # Deterministic status and reason evaluation:
-        # 1. Separate connectivity_status and optical_budget_status
+        # 1. Separate connectivity_status, optical_budget_status, and physical_route_status
         connectivity_status_val = "invalid_topology" if relevant_invalid_issues else "connected"
+        path_cables = [cables_by_id[cid] for cid in cable_segment_ids if cid in cables_by_id]
+        physical_route_status_val = _resolve_physical_route_status(path_cables)
         has_budget_fail = has_overload_fail or has_sensitivity_fail or has_margin_fail or has_invalid_configuration
         has_missing_inputs = (
             has_unconfigured_splitter
@@ -1659,6 +1794,9 @@ def calculate_optical_budget(
                     if any(path_parameter_sources[name] == "legacy_fallback" for name in unverified_parameters)
                     else "unknown_optical_parameters"
                 )
+        if has_unmeasured_internal_jumper and status_value != "fail":
+            status_value = "unknown"
+            status_reason = "internal_jumper_length_unknown"
         if missing_component_ids and status_value != "fail":
             status_value = "unknown"
             if not has_unconfigured_splitter:
@@ -1733,6 +1871,7 @@ def calculate_optical_budget(
                 status=status_value,
                 connectivity_status=connectivity_status_val,
                 optical_budget_status=optical_budget_status_val,
+                physical_route_status=physical_route_status_val,
                 status_reason=status_reason,
                 diagnostics=path_diagnostics,
                 calculation_limitations=calculation_limitations,
@@ -1828,7 +1967,11 @@ def calculate_optical_budget(
             if ((component.node_id and component.node_id in node_ids)
                 or (component.connection_id and component.connection_id in connection_ids))
         }
-        scope_ids = set(node_ids) | cable_ids | component_ids
+        mounted_splitter_ids = {
+            splitter.node_id for splitter in path.splitters
+            if nodes_by_id[splitter.node_id].properties.get("mountedInNodeId") in node_ids
+        }
+        scope_ids = set(node_ids) | mounted_splitter_ids | cable_ids | component_ids
         return {
             key: value for key, value in path.parameter_sources.items()
             if key in {"txPowerDbm", "safetyMarginDb"} or key.split(".", 1)[0] in scope_ids
@@ -1878,6 +2021,19 @@ def calculate_optical_budget(
                     source=path.parameter_sources.get(f"{node_id}.splitterLossDb", "unknown"),
                     node_id=node_id, path_position=position,
                 )
+            for s_id, mounted_spl in splitter_by_node.items():
+                if s_id == node_id:
+                    continue
+                s_node = nodes_by_path_id.get(s_id)
+                if s_node and s_node.properties.get("mountedInNodeId") == node_id:
+                    append_row(
+                        component_id=f"{s_id}:splitter", component=f"Splitter · {mounted_spl.node_name} ({s_id}){f' · {mounted_spl.splitter_ratio}' if mounted_spl.splitter_ratio else ''}",
+                        category="splitter", position=f"At {node.name if node else node_id} (topology node {position + 1})",
+                        quantity=1.0, quantity_unit="device", unit_loss_db=mounted_spl.loss_db,
+                        unit_loss_unit="dB/device", total_loss_db=mounted_spl.loss_db,
+                        source=path.parameter_sources.get(f"{s_id}.splitterLossDb", "unknown"),
+                        node_id=s_id, path_position=position,
+                    )
             for component in components_by_node.get(node_id, []):
                 if component.id in seen_components:
                     continue
@@ -2052,6 +2208,7 @@ def calculate_optical_budget(
                 intermediate_nodes.append({
                     "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
                     "status": "estimated" if probe_path.received_power_dbm is not None and not unverified_sources else "unknown",
+                    "physical_route_status": probe_path.physical_route_status,
                     "source_olt_id": probe_path.node_ids[0] if probe_path.node_ids else None,
                     "node_ids": probe_path.node_ids, "connection_ids": probe_path.connection_ids,
                     "length_m": probe_path.length_m, "accumulated_loss_db": probe_path.loss_db,
@@ -2083,7 +2240,11 @@ def calculate_optical_budget(
         if any(value is None for value in length_parts):
             diagnostics.append("One or more route lengths are unknown.")
 
-        prefix_splitters = [splitter for splitter in path.splitters if splitter.node_id in prefix_node_ids]
+        prefix_splitters = [
+            splitter for splitter in path.splitters
+            if splitter.node_id in prefix_node_ids
+            or nodes_by_id[splitter.node_id].properties.get("mountedInNodeId") in prefix_node_ids
+        ]
         splitter_losses = [splitter.loss_db for splitter in prefix_splitters]
         if any(value is None for value in splitter_losses):
             diagnostics.append("A splitter on the prefix has unknown insertion loss.")
@@ -2118,9 +2279,11 @@ def calculate_optical_budget(
         complete_length = all(value is not None for value in length_parts)
         length_m = round(sum(value for value in length_parts if value is not None), 2) if complete_length else None
         loss_breakdown, category_losses = make_loss_breakdown(path, prefix_node_ids, prefix_connection_ids)
+        prefix_cables = [cables_by_id[seg.cable_segment_id] for seg in prefix_segments if seg.cable_segment_id in cables_by_id]
         intermediate_nodes.append({
             "node_id": target.id, "node_name": target.name, "node_type": target.type.value,
             "status": "estimated" if estimated_power is not None and not unverified_sources else "unknown",
+            "physical_route_status": _resolve_physical_route_status(prefix_cables),
             "source_olt_id": path.node_ids[0] if path.node_ids else None,
             "node_ids": prefix_node_ids, "connection_ids": prefix_connection_ids,
             "length_m": length_m, "accumulated_loss_db": total_loss,

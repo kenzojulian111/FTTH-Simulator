@@ -240,7 +240,9 @@ export function NetworkMap({ project, tool, selection, onMapClick, onMapMove, on
     const category = resolveCableCategory(cable);
     const categoryColor = category ? CABLE_CATEGORY_COLORS[category] : null;
     const baseColor = categoryColor ?? (connected ? "#38bdf8" : "#d99b38");
-    return <Polyline key={cable.id} positions={cable.geometry.coordinates.map(toLatLng)} pathOptions={{ color: failed ? "#ef4444" : selected ? "#ffbb55" : baseColor, weight: selected ? 6 : 5, opacity: 0.95, dashArray: connected ? undefined : "10 7" }} interactive={!cableMode} eventHandlers={{ click: (event) => { L.DomEvent.stopPropagation(event.originalEvent); if (!cableMode) onSelect({ kind: "cable", id: cable.id }); } }} />;
+    if (cable.geometry.coordinates.length < 2) return null;
+    const routeUnverified = cable.properties.routeStatus === "map_candidate_unverified" || cable.properties.routeStatus === "existing_geometry_unverified";
+    return <Polyline key={cable.id} positions={cable.geometry.coordinates.map(toLatLng)} pathOptions={{ color: failed ? "#ef4444" : selected ? "#ffbb55" : baseColor, weight: selected ? 6 : 5, opacity: 0.95, dashArray: connected && !routeUnverified ? undefined : "10 7" }} interactive={!cableMode} eventHandlers={{ click: (event) => { L.DomEvent.stopPropagation(event.originalEvent); if (!cableMode) onSelect({ kind: "cable", id: cable.id }); } }} />;
   };
   const spanLine = (span: PoleSpan) => {
     const cable = project.cableSegments.find((item) => item.id === span.cableSegmentId);
@@ -286,7 +288,7 @@ export function NetworkMap({ project, tool, selection, onMapClick, onMapMove, on
     {areaDrawingPreview && areaDrawingPreview.length > 0 && <Polyline positions={areaDrawingPreview.map(toLatLng)} pathOptions={{ color: "#22c55e", weight: 2, dashArray: "6 6" }} interactive={false} />}
     {project.cableSegments.map(cableLine)}
     {(project.poleSpans ?? []).map(spanLine)}
-    {project.nodes.map((node) => featureMarker(node, "node", node.type))}
+    {project.nodes.filter((node) => !(node.type === "splitter" && typeof node.properties.mountedInNodeId === "string")).map((node) => featureMarker(node, "node", node.type))}
     {project.customers.map((customer) => featureMarker(customer, "customer", "customer"))}
     {previewCoordinates.length > 1 && <Polyline positions={previewCoordinates.map(toLatLng)} pathOptions={{ className: "cable-route-preview", color: "#f59e42", weight: 4, opacity: 0.95, dashArray: "8 8", lineCap: "round" }} interactive={false} />}
     {!cableMode && selectedCable?.geometry.coordinates.map((point, index) => <Marker key={`${selectedCable.id}-${index}`} position={toLatLng(point)} icon={L.divIcon({ className: "vertex-wrap", html: '<span class="vertex-dot"></span>', iconSize: [14, 14], iconAnchor: [7, 7] })} draggable eventHandlers={{ dragend: (event) => onMoveVertex(selectedCable.id, index, toCoordinate(event.target.getLatLng())) }} />)}

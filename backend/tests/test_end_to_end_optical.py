@@ -416,8 +416,10 @@ def test_end_to_end_path_breakdown_and_component_losses():
     # incoming edge, not again on the following edge as a source splitter.
     assert [link.details["splitterLossDb"] for link in result.links] == [7.2, 10.5, 0.0]
     assert sum(link.details["splitterLossDb"] for link in result.links) == path.details["splitterLossDb"]
-    assert [link.received_power_dbm for link in result.links] == [-6.5, None, None]
-    assert [link.model_dump(by_alias=True)["receivedPowerDbm"] for link in result.links] == [-6.5, None, None]
+    assert [link.received_power_dbm for link in result.links] == [None, None, None]
+    assert result.links[0].details["estimatedOpticalPowerDbm"] == -6.5
+    assert result.links[0].details["receiverEvaluation"] == "not_applicable"
+    assert [link.model_dump(by_alias=True)["receivedPowerDbm"] for link in result.links] == [None, None, None]
 
 
 def test_splitter_inclusion_only_when_on_actual_path():

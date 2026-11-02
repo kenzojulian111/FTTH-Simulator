@@ -75,11 +75,13 @@ def test_hand_computed_optical_budget_case():
     assert pytest.approx(link.loss_db, abs=0.01) == 12.30
     assert pytest.approx(link.details["totalLossDb"], abs=0.01) == 15.30
     assert pytest.approx(link.details["safetyMarginDb"], abs=0.01) == 3.00
-    # Physical received power (safety margin not deducted): +2.50 - 12.30 = -9.80 dBm
-    assert pytest.approx(link.received_power_dbm, abs=0.01) == -9.80
-    # Design margin: -9.80 - (-27.00) - 3.00 = +14.20 dB
-    assert pytest.approx(link.margin_db, abs=0.01) == 14.20
-    assert link.status == "pass"
+    # A passive ODC has an estimated optical power, but no receiver sensitivity,
+    # overload, headroom, or PASS/FAIL classification.
+    assert link.received_power_dbm is None
+    assert pytest.approx(link.details["estimatedOpticalPowerDbm"], abs=0.01) == -9.80
+    assert link.details["receiverEvaluation"] == "not_applicable"
+    assert link.margin_db is None
+    assert link.status == "unknown"
 
 
 def test_optical_budget_fail_low_signal():

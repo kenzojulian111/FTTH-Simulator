@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createValidatedConnection, validateConnection } from "../domain/connectionValidation";
+import { getAvailablePorts } from "../domain/devicePorts";
 import type { ConnectionValidationRequest } from "../domain/types";
 import type { Project, TopologyConnection, TopologyValidationResult } from "../domain/types";
 
@@ -8,6 +9,8 @@ interface Props {
   initialSourceId?: string;
   initialDestinationId?: string;
   initialCableId?: string;
+  initialSourcePortId?: string;
+  initialDestinationPortId?: string;
   validateWithBackend: (projectId: string, request: ConnectionValidationRequest) => Promise<TopologyValidationResult>;
   onClose: () => void;
   onConnect: (connection: TopologyConnection) => void;
@@ -17,13 +20,28 @@ interface Props {
 interface CandidateCheck { result?: TopologyValidationResult; error?: string }
 interface CandidateChecks { key: string; loading: boolean; byDestination: Record<string, CandidateCheck> }
 
-export function ConnectionDialog({ project, initialSourceId = "", initialDestinationId = "", initialCableId = "", validateWithBackend, onClose, onConnect, onRejected }: Props) {
+export function ConnectionDialog({ project, initialSourceId = "", initialDestinationId = "", initialCableId = "", initialSourcePortId = "", initialDestinationPortId = "", validateWithBackend, onClose, onConnect, onRejected }: Props) {
   const [fromNodeId, setFromNodeId] = useState(initialSourceId);
   const [toNodeId, setToNodeId] = useState(initialDestinationId);
+  const [fromPortId, setFromPortId] = useState(initialSourcePortId);
+  const [toPortId, setToPortId] = useState(initialDestinationPortId);
   const [cableSegmentId, setCableSegmentId] = useState(initialCableId);
-  const draft = { fromNodeId, toNodeId, cableSegmentId };
-  const localValidation = useMemo(() => validateConnection(project, draft), [project, fromNodeId, toNodeId, cableSegmentId]);
-  const checkKey = `${project.id}|${project.updatedAt}|${fromNodeId}|${cableSegmentId}`;
+
+  const sourceNode = useMemo(() => project.nodes.find((n) => n.id === fromNodeId), [project.nodes, fromNodeId]);
+  const destNode = useMemo(() => project.nodes.find((n) => n.id === toNodeId), [project.nodes, toNodeId]);
+
+  const availableSourcePorts = useMemo(() => sourceNode ? getAvailablePorts(sourceNode, project.connections, "out") : [], [sourceNode, project.connections]);
+  const availableDestPorts = useMemo(() => destNode ? getAvailablePorts(destNode, project.connections, "in") : [], [destNode, project.connections]);
+
+  const draft = {
+    fromNodeId,
+    toNodeId,
+    cableSegmentId,
+    ...(fromPortId ? { fromPortId } : {}),
+    ...(toPortId ? { toPortId } : {}),
+  };
+  const localValidation = useMemo(() => validateConnection(project, draft), [project, fromNodeId, toNodeId, cableSegmentId, fromPortId, toPortId]);
+  const checkKey = `${project.id}|${project.updatedAt}|${fromNodeId}|${cableSegmentId}|${fromPortId}`;
   const [candidateChecks, setCandidateChecks] = useState<CandidateChecks>({ key: "", loading: false, byDestination: {} });
   const otherNodes = project.nodes.filter((node) => node.id !== fromNodeId);
   const canCheckCandidates = Boolean(fromNodeId && project.nodes.some((node) => node.id === fromNodeId) && cableSegmentId && project.cableSegments.some((cable) => cable.id === cableSegmentId));
@@ -36,7 +54,13 @@ export function ConnectionDialog({ project, initialSourceId = "", initialDestina
     let active = true;
     setCandidateChecks({ key: checkKey, loading: true, byDestination: {} });
     const checks = otherNodes.map(async (node): Promise<[string, CandidateCheck]> => {
-      const request: ConnectionValidationRequest = { fromNodeId, toNodeId: node.id, cableSegmentId, project };
+      const request: ConnectionValidationRequest = {
+        fromNodeId,
+        toNodeId: node.id,
+        cableSegmentId,
+        ...(fromPortId ? { fromPortId } : {}),
+        project,
+      };
       try {
         return [node.id, { result: await validateWithBackend(project.id, request) }];
       } catch (error) {
@@ -47,7 +71,7 @@ export function ConnectionDialog({ project, initialSourceId = "", initialDestina
       if (active) setCandidateChecks({ key: checkKey, loading: false, byDestination: Object.fromEntries(results) });
     });
     return () => { active = false; };
-  }, [canCheckCandidates, checkKey, fromNodeId, cableSegmentId, project, validateWithBackend]);
+  }, [canCheckCandidates, checkKey, fromNodeId, cableSegmentId, fromPortId, project, validateWithBackend]);
 
   const currentChecks = candidateChecks.key === checkKey ? candidateChecks : null;
   const selectedCheck = toNodeId ? currentChecks?.byDestination[toNodeId] : undefined;
@@ -79,13 +103,13 @@ export function ConnectionDialog({ project, initialSourceId = "", initialDestina
     <section className="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title">
       <header className="connection-dialog-heading"><div><small>TOPOLOGY EDITOR</small><h2 id="connection-dialog-title">Create Connection</h2></div><button type="button" aria-label="Close connection dialog" onClick={onClose}>×</button></header>
       <label className="connection-field">Source device
-        <select value={fromNodeId} onChange={(event) => setFromNodeId(event.target.value)}>
+        <select value={fromNodeId} onChange={(event) => { setFromNodeId(event.target.value); setFromPortId(""); }}>
           <option value="">Select source…</option>
           {project.nodes.map((node) => <option key={node.id} value={node.id}>{node.name} · {node.type.toUpperCase()}</option>)}
         </select>
       </label>
       <label className="connection-field">Destination device
-        <select value={toNodeId} onChange={(event) => setToNodeId(event.target.value)}>
+        <select value={toNodeId} onChange={(event) => { setToNodeId(event.target.value); setToPortId(""); }}>
           <option value="">Select destination…</option>
           {otherNodes.map((node) => {
             const check = currentChecks?.byDestination[node.id];
@@ -102,12 +126,23 @@ export function ConnectionDialog({ project, initialSourceId = "", initialDestina
           {project.cableSegments.map((cable) => <option key={cable.id} value={cable.id}>{cable.name}{cable.cableType ? ` · ${cable.cableType}` : ""}</option>)}
         </select>
       </label>
+      {availableSourcePorts.length > 0 && <label className="connection-field">Source port
+        <select value={fromPortId} onChange={(event) => setFromPortId(event.target.value)}>
+          <option value="">Auto-assign available port</option>
+          {availableSourcePorts.map((port) => <option key={port.id} value={port.id}>{port.label} ({port.status})</option>)}
+        </select>
+      </label>}
+      {availableDestPorts.length > 0 && <label className="connection-field">Destination port
+        <select value={toPortId} onChange={(event) => setToPortId(event.target.value)}>
+          <option value="">Auto-assign available port</option>
+          {availableDestPorts.map((port) => <option key={port.id} value={port.id}>{port.label} ({port.status})</option>)}
+        </select>
+      </label>}
       <div className={`connection-validation ${validationPassed ? "valid" : "invalid"}`} role="status" aria-live="polite">
         <strong>{validationPassed ? "Backend approved" : "Connection needs attention"}</strong>
         <span>{validationMessage}</span>
       </div>
       {selectedCheck?.result?.warnings.map((warning, index) => <p className="connection-policy-note" key={`${warning.code}-${index}`}>Warning: {warning.message}</p>)}
-      <p className="connection-schema-note">Connection type is not stored by the current project schema.</p>
       <footer className="connection-dialog-actions"><button type="button" className="load-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" onClick={connect} disabled={!validationPassed}>Connect <span>↗</span></button></footer>
     </section>
   </div>;

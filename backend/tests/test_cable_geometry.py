@@ -97,10 +97,9 @@ def test_line_geometry_multi_vertex_validation():
         LineGeometry(coordinates=[(106.8400, -6.2000)])
     assert "at least two coordinates" in str(exc.value)
 
-    # Empty coordinates
-    with pytest.raises(ValidationError) as exc:
-        LineGeometry(coordinates=[])
-    assert "at least two coordinates" in str(exc.value)
+    # Empty coordinates are the geometry representation for explicitly
+    # manual-required cable routes; CableSegment enforces that provenance.
+    assert LineGeometry(coordinates=[]).coordinates == []
 
     # Out of bounds intermediate vertex
     bad_coords = [

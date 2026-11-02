@@ -61,7 +61,12 @@ def calculate_construction_cost(
         )
         if is_copper:
             continue
+        if cable.properties.get("routeStatus") == "manual_required" and not cable.geometry.coordinates:
+            incomplete_items.append({"code": f"ROUTE-MANUAL-{cable.id}", "description": f"Cable '{cable.name}' requires manual route planning; no quantity is included until route length is known.", "quantity": None, "unit": "meter", "reason": "manual_route_required"})
+            continue
         route_length_m = float(cable.length_m) if cable.length_m is not None else calculate_route_length(cable.geometry.coordinates)
+        if cable.properties.get("routeStatus") in {"map_candidate_unverified", "existing_geometry_unverified"}:
+            incomplete_items.append({"code": f"ROUTE-VERIFY-{cable.id}", "description": f"Cable '{cable.name}' has a mapped route quantity of {route_length_m:.2f} m that requires field verification before procurement.", "quantity": round(route_length_m, 2), "unit": "meter", "reason": "route_field_verification_required"})
         explicit_cat = cable.properties.get("cableCategory")
         category = (
             explicit_cat.strip()

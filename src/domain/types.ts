@@ -100,7 +100,30 @@ export interface CableSegment {
 export interface PoleSpan { id: string; cableSegmentId: string; fromPoleId: string; toPoleId: string; geometry?: LineGeometry | null; coversEntireCableRoute: boolean; status: "existing" | "proposed" | "shared" | "unverified"; notes: string; lengthM: number | null; lengthSource?: "measured" | "geometry" | "legacy" | "unknown" }
 export interface ProjectArea { id: string; name: string; geometry: { type: "Polygon"; coordinates: Coordinate[][] }; fillColor: string; fillOpacity: number; borderColor?: string; description?: string; classification?: "project_boundary" | "service_area" | "residential_block" | "custom" }
 export interface OpticalComponent { id: string; kind: string; nodeId?: string | null; connectionId?: string | null; location?: string | null; configuredLossDb: number | null; configuredSource: "configured" | "unknown"; datasheetLossDb?: number | null; datasheetReference?: string | null; datasheetModel?: string | null; measuredLossDb?: number | null; measuredAt?: string | null; measurementMethod?: string | null; measurementReference?: string | null; procurementQuantity?: number | null; procurementUnit?: string | null; materialUnitCost?: number | null; installationUnitCost?: number | null; priceSource?: "configured" | "unknown"; priceReference?: string | null }
-export interface TopologyConnection { id: string; fromNodeId: string; toNodeId: string; cableSegmentId: string }
+export type PortType = "pon" | "feeder_in" | "distribution_out" | "input" | "output" | "drop_out" | "uplink" | "lan";
+export type PortStatus = "available" | "connected" | "disabled";
+export interface DevicePort {
+  id: string;
+  label: string;
+  portType: PortType;
+  nodeId: string;
+  capacity?: number;
+  status: PortStatus;
+  connectedNodeId?: string | null;
+  connectedNodeName?: string | null;
+  connectedPortId?: string | null;
+  connectionId?: string | null;
+}
+export interface TopologyConnection {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  cableSegmentId: string;
+  medium?: "fiber" | "copper" | "wireless";
+  connectionType?: "optical" | "ethernet";
+  fromPortId?: string | null;
+  toPortId?: string | null;
+}
 export interface TopologyIssue {
   code: string; message: string; severity: "error" | "warning" | "info"; policyCode?: string | null;
   fromNodeId?: string | null; toNodeId?: string | null; cableSegmentId?: string | null; connectionId?: string | null;
@@ -109,6 +132,10 @@ export interface TopologyIssue {
 export interface TopologyValidationResult { valid: boolean; errors: TopologyIssue[]; warnings: TopologyIssue[]; summary: Record<string, unknown> }
 export interface ConnectionValidationRequest {
   fromNodeId: string; toNodeId: string; cableSegmentId: string; connectionId?: string | null; project?: Project | null;
+  medium?: "fiber" | "copper" | "wireless";
+  connectionType?: "optical" | "ethernet";
+  fromPortId?: string | null;
+  toPortId?: string | null;
 }
 export interface Project {
   id: string; name: string; description: string; currency: string; nodes: NetworkNode[];
@@ -166,7 +193,7 @@ export interface OpticalDiagnosticItem {
 }
 export interface OpticalBudgetResult {
   projectId: string; calculatedAt: string;
-  links: Array<{ connectionId: string; lengthM: number; lossDb: number; receivedPowerDbm: number | null; status: "pass" | "warning" | "fail" | "unknown"; marginDb?: number | null; details?: Record<string, unknown> | null }>;
+  links: Array<{ connectionId: string; lengthM: number | null; lossDb: number | null; receivedPowerDbm: number | null; status: "pass" | "warning" | "fail" | "unknown"; marginDb?: number | null; details?: Record<string, unknown> | null }>;
   paths: Array<{
     ontNodeId: string; customerIds: string[]; nodeIds: string[]; connectionIds: string[];
     cableSegmentIds?: string[]; lengthM: number | null; lossDb: number | null;
@@ -175,6 +202,7 @@ export interface OpticalBudgetResult {
     status: "pass" | "warning" | "fail" | "unknown"; statusReason?: string | null;
     connectivityStatus?: "connected" | "disconnected" | "invalid_topology" | "ambiguous";
     opticalBudgetStatus?: "pass" | "fail" | "unknown";
+    physicalRouteStatus?: "planned" | "unverified" | "verified";
     diagnostics?: OpticalDiagnosticItem[];
     calculationLimitations?: string[];
     parameterSources?: Record<string, "configured" | "profile_default" | "legacy_fallback" | "unknown">; profileId?: string | null;
@@ -182,7 +210,7 @@ export interface OpticalBudgetResult {
       connectionId: string; cableSegmentId: string; cableName: string;
       fromNodeId: string; fromNodeName: string; fromNodeType: string;
       toNodeId: string; toNodeName: string; toNodeType: string;
-      lengthM: number; routeLengthContributionM?: number | null; attenuationDbPerKm: number | null; fiberLossDb: number | null;
+      lengthM: number | null; routeLengthContributionM?: number | null; attenuationDbPerKm: number | null; fiberLossDb: number | null;
       fiberType?: string | null; wavelengthNm?: number | null;
       connectorsCount: number | null; connectorUnitLossDb?: number | null; connectorLossDb: number | null; splicesCount: number | null;
       spliceUnitLossDb?: number | null; spliceLossDb: number | null; pigtailSpliceUnitLossDb?: number | null; totalSegmentLossDb: number | null;
@@ -198,6 +226,7 @@ export interface OpticalBudgetResult {
   intermediateNodes?: Array<{
     nodeId: string; nodeName: string; nodeType: "odc" | "odp";
     status: "estimated" | "unknown" | "ambiguous" | "unreachable";
+    physicalRouteStatus?: "planned" | "unverified" | "verified";
     sourceOltId?: string | null; nodeIds?: string[]; connectionIds?: string[];
     lengthM: number | null; accumulatedLossDb: number | null;
     estimatedPowerDbm: number | null; transmitterPowerDbm?: number | null; sourceOltName?: string | null; profileId?: string | null;

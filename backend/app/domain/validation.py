@@ -386,7 +386,10 @@ def validate_connection_candidate(
     if errors:
         return TopologyValidationResult(valid=False, errors=errors, warnings=warnings, summary=summary)
 
-    if has_zero_length_route(cable.geometry.coordinates):
+    manual_route = cable.properties.get("routeStatus") == "manual_required"
+    if not cable.geometry.coordinates and not manual_route:
+        errors.append(TopologyIssue(code="missing_cable_route", policy_code="invalid-reference", message=f"Cable '{cable.name}' has no route geometry and is not marked for manual route planning.", severity="error", from_node_id=request.from_node_id, to_node_id=request.to_node_id, cable_segment_id=cable.id, connection_id=request.connection_id))
+    if cable.geometry.coordinates and has_zero_length_route(cable.geometry.coordinates):
         errors.append(TopologyIssue(
             code="zero_length_cable_route",
             policy_code="zero-length-route",
@@ -403,7 +406,7 @@ def validate_connection_candidate(
     summary["toNodeType"] = to_node.type.value
     summary["toNodeName"] = to_node.name
     summary["cableName"] = cable.name
-    cable_length = cable.length_m if cable.length_m is not None else round(calculate_route_length(cable.geometry.coordinates), 2)
+    cable_length = cable.length_m if cable.length_m is not None else (round(calculate_route_length(cable.geometry.coordinates), 2) if cable.geometry.coordinates else None)
     summary["cableLengthM"] = cable_length
     summary["cableVertexCount"] = len(cable.geometry.coordinates)
 
@@ -747,6 +750,39 @@ def validate_connection_candidate(
             )
         )
 
+    # 9. Port Capacity and Conflict Checks
+    if request.from_port_id and from_node.type in (NodeType.ODC, NodeType.ODP, NodeType.SPLITTER):
+        port_used = any(c.from_node_id == from_node.id and c.from_port_id == request.from_port_id for c in other_connections)
+        if port_used:
+            errors.append(
+                TopologyIssue(
+                    code="port_already_in_use",
+                    policy_code="capacity-exceeded",
+                    message=f"Output port '{request.from_port_id}' on '{from_node.name}' is already connected to another device",
+                    severity="error",
+                    from_node_id=request.from_node_id,
+                    to_node_id=request.to_node_id,
+                    cable_segment_id=request.cable_segment_id,
+                    connection_id=request.connection_id,
+                )
+            )
+
+    if request.to_port_id and to_node.type in (NodeType.ODC, NodeType.ODP, NodeType.ONT, NodeType.SPLITTER):
+        port_used = any(c.to_node_id == to_node.id and c.to_port_id == request.to_port_id for c in other_connections)
+        if port_used:
+            errors.append(
+                TopologyIssue(
+                    code="port_already_in_use",
+                    policy_code="capacity-exceeded",
+                    message=f"Input port '{request.to_port_id}' on '{to_node.name}' is already connected to another device",
+                    severity="error",
+                    from_node_id=request.from_node_id,
+                    to_node_id=request.to_node_id,
+                    cable_segment_id=request.cable_segment_id,
+                    connection_id=request.connection_id,
+                )
+            )
+
     valid = len(errors) == 0
     return TopologyValidationResult(valid=valid, errors=errors, warnings=warnings, summary=summary)
 
@@ -775,6 +811,8 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
 
     # 2. Check each connection
     seen_triplets: Set[Tuple[str, str, str]] = set()
+    seen_from_ports: Dict[Tuple[str, str], str] = {}
+    seen_to_ports: Dict[Tuple[str, str], str] = {}
     incoming_to_ont: Dict[str, List[str]] = {}
     incoming_to_router: Dict[str, List[str]] = {}
     incoming_to_passive: Dict[str, List[str]] = {}
@@ -789,7 +827,17 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
         if not from_node or not to_node or not cable:
             continue
 
-        if has_zero_length_route(cable.geometry.coordinates):
+        manual_route = cable.properties.get("routeStatus") == "manual_required"
+        if manual_route and not cable.geometry.coordinates:
+            if cable.properties.get("connectionKind") == "internal_optical_jumper":
+                warnings.append(TopologyIssue(code="internal_jumper_length_unknown", policy_code="internal-link-specification-required", message=f"Internal optical jumper '{cable.name}' has co-located endpoints but no specified physical jumper length.", severity="warning", from_node_id=conn.from_node_id, to_node_id=conn.to_node_id, cable_segment_id=cable.id, connection_id=conn.id, details={"endpointCoordinateDistanceM": 0, "physicalLengthStatus": cable.properties.get("physicalLengthStatus", "unknown")}))
+            else:
+                warnings.append(TopologyIssue(code="manual_route_required", policy_code="route-planning-required", message=f"Cable '{cable.name}' is a logical connection pending manual route planning; no geographic route or length is verified.", severity="warning", from_node_id=conn.from_node_id, to_node_id=conn.to_node_id, cable_segment_id=cable.id, connection_id=conn.id))
+        elif cable.properties.get("routeStatus") == "map_candidate_unverified":
+            warnings.append(TopologyIssue(code="route_field_verification_required", policy_code="route-field-verification-required", message=f"Cable '{cable.name}' follows an OSM road-route candidate, not a surveyed or approved fiber route.", severity="warning", from_node_id=conn.from_node_id, to_node_id=conn.to_node_id, cable_segment_id=cable.id, connection_id=conn.id, details={"routeSource": cable.properties.get("routeSource"), "fieldVerificationRequired": True}))
+        if not cable.geometry.coordinates and not manual_route:
+            errors.append(TopologyIssue(code="missing_cable_route", policy_code="invalid-reference", message=f"Cable '{cable.name}' has no route geometry and is not marked for manual route planning.", severity="error", from_node_id=conn.from_node_id, to_node_id=conn.to_node_id, cable_segment_id=cable.id, connection_id=conn.id))
+        if cable.geometry.coordinates and has_zero_length_route(cable.geometry.coordinates):
             errors.append(TopologyIssue(
                 code="zero_length_cable_route",
                 policy_code="zero-length-route",
@@ -1004,6 +1052,42 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
         cable_usage[cable.id] = cable_usage.get(cable.id, 0) + 1
         from_node_usage[from_node.id] = from_node_usage.get(from_node.id, 0) + 1
 
+        if conn.from_port_id and from_node.type in (NodeType.ODC, NodeType.ODP, NodeType.SPLITTER):
+            from_port_key = (conn.from_node_id, conn.from_port_id)
+            if from_port_key in seen_from_ports:
+                errors.append(
+                    TopologyIssue(
+                        code="port_already_in_use",
+                        policy_code="capacity-exceeded",
+                        message=f"Output port '{conn.from_port_id}' on '{from_node.name}' is connected more than once",
+                        severity="error",
+                        from_node_id=conn.from_node_id,
+                        to_node_id=conn.to_node_id,
+                        cable_segment_id=conn.cable_segment_id,
+                        connection_id=conn.id,
+                    )
+                )
+            else:
+                seen_from_ports[from_port_key] = conn.id
+
+        if conn.to_port_id and to_node.type in (NodeType.ODC, NodeType.ODP, NodeType.ONT, NodeType.SPLITTER):
+            to_port_key = (conn.to_node_id, conn.to_port_id)
+            if to_port_key in seen_to_ports:
+                errors.append(
+                    TopologyIssue(
+                        code="port_already_in_use",
+                        policy_code="capacity-exceeded",
+                        message=f"Input port '{conn.to_port_id}' on '{to_node.name}' is connected more than once",
+                        severity="error",
+                        from_node_id=conn.from_node_id,
+                        to_node_id=conn.to_node_id,
+                        cable_segment_id=conn.cable_segment_id,
+                        connection_id=conn.id,
+                    )
+                )
+            else:
+                seen_to_ports[to_port_key] = conn.id
+
     # Check ONT multiple inputs
     for ont_id, incoming_conns in incoming_to_ont.items():
         if len(incoming_conns) > 1:
@@ -1091,6 +1175,22 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
                 )
             )
 
+    for cable in project.cable_segments:
+        required_cores = cable.properties.get("requiredFiberCores")
+        if required_cores is None:
+            continue
+        try:
+            required_core_count = int(required_cores)
+        except (TypeError, ValueError):
+            errors.append(TopologyIssue(code="cable_required_core_count_invalid", policy_code="invalid-configuration", message=f"Cable '{cable.name}' has invalid requiredFiberCores={required_cores!r}.", severity="error", cable_segment_id=cable.id))
+            continue
+        if required_core_count < 1:
+            errors.append(TopologyIssue(code="cable_required_core_count_invalid", policy_code="invalid-configuration", message=f"Cable '{cable.name}' requiredFiberCores must be positive.", severity="error", cable_segment_id=cable.id))
+        elif cable.fiber_count is None:
+            warnings.append(TopologyIssue(code="feeder_core_capacity_unknown", policy_code="capacity-unknown", message=f"Cable '{cable.name}' must carry at least {required_core_count} feeder fibers, but its fiber count is not recorded.", severity="warning", cable_segment_id=cable.id, details={"requiredFiberCores": required_core_count, "fiberCount": None}))
+        elif cable.fiber_count < required_core_count:
+            errors.append(TopologyIssue(code="feeder_core_capacity_exceeded", policy_code="capacity-exceeded", message=f"Cable '{cable.name}' has {cable.fiber_count} fibers, fewer than the {required_core_count} required PON feeder fibers.", severity="error", cable_segment_id=cable.id, details={"requiredFiberCores": required_core_count, "fiberCount": cable.fiber_count}))
+
     for from_id, used_count in from_node_usage.items():
         from_node = nodes_by_id[from_id]
         splitter_cap = _extract_splitter_capacity(from_node)
@@ -1112,6 +1212,208 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
                     from_node_id=from_id,
                 )
             )
+        elif from_node.type == NodeType.SPLITTER and effective_cap is None and used_count > 0:
+            warnings.append(TopologyIssue(code="splitter_capacity_unknown", policy_code="capacity-unknown", message=f"Splitter '{from_node.name}' has {used_count} connected outputs but no configured ratio or rated port capacity.", severity="warning", from_node_id=from_id, details={"connectedOutputs": used_count, "splitterRatio": from_node.properties.get("splitterRatio")}))
+
+    # Cabinet mounted splitters are optical components hosted by an ODC/ODP,
+    # not graph vertices joined by an unmeasured geographic jumper cable.
+    for mounted_splitter in project.nodes:
+        if mounted_splitter.type != NodeType.SPLITTER:
+            continue
+        host_id = mounted_splitter.properties.get("mountedInNodeId")
+        if not host_id:
+            continue
+        host = nodes_by_id.get(host_id)
+        if host is None or host.type not in {NodeType.ODC, NodeType.ODP}:
+            errors.append(TopologyIssue(code="splitter_mount_host_invalid", policy_code="invalid-reference", message=f"Mounted splitter '{mounted_splitter.name}' references an invalid ODC/ODP host.", severity="error", from_node_id=host_id if isinstance(host_id, str) else None, details={"splitterId": mounted_splitter.id, "mountedInNodeId": host_id}))
+            continue
+        pon_port_id = mounted_splitter.properties.get("ponPortId")
+        if host.type == NodeType.ODC and pon_port_id:
+            expected_output_targets = [
+                edge.to_node_id for edge in project.connections
+                if edge.from_node_id == host.id
+                and nodes_by_id.get(edge.to_node_id)
+                and nodes_by_id[edge.to_node_id].type == NodeType.ODP
+                and nodes_by_id[edge.to_node_id].properties.get("sourcePonPortId") == pon_port_id
+            ]
+        else:
+            expected_output_targets = [
+                edge.to_node_id for edge in project.connections
+                if edge.from_node_id == host.id
+                and nodes_by_id.get(edge.to_node_id)
+                and nodes_by_id[edge.to_node_id].type == NodeType.ONT
+            ]
+        used_outputs = len(expected_output_targets)
+        capacity = _extract_splitter_capacity(mounted_splitter)
+        input_port_id = mounted_splitter.properties.get("inputPortId")
+        output_assignments = mounted_splitter.properties.get("outputPortAssignments")
+        if not isinstance(input_port_id, str) or not input_port_id.strip():
+            errors.append(TopologyIssue(
+                code="splitter_input_port_invalid",
+                policy_code="invalid-reference",
+                message=f"Mounted splitter '{mounted_splitter.name}' has no explicit input port reference.",
+                severity="error",
+                from_node_id=host.id,
+                details={"splitterId": mounted_splitter.id},
+            ))
+        if not isinstance(output_assignments, list):
+            errors.append(TopologyIssue(
+                code="splitter_output_ports_invalid",
+                policy_code="invalid-reference",
+                message=f"Mounted splitter '{mounted_splitter.name}' has no explicit output-port assignments.",
+                severity="error",
+                from_node_id=host.id,
+                details={"splitterId": mounted_splitter.id},
+            ))
+            output_assignments = []
+        port_ids = [item.get("portId") for item in output_assignments if isinstance(item, dict)]
+        target_ids = [item.get("connectedNodeId") for item in output_assignments if isinstance(item, dict)]
+        valid_port_ids = [value for value in port_ids if isinstance(value, str)]
+        valid_target_ids = [value for value in target_ids if isinstance(value, str)]
+        if len(port_ids) != len(output_assignments) or len(valid_port_ids) != len(port_ids) or any(not value.strip() for value in valid_port_ids) or len(set(valid_port_ids)) != len(valid_port_ids):
+            errors.append(TopologyIssue(
+                code="splitter_output_ports_invalid",
+                policy_code="invalid-reference",
+                message=f"Mounted splitter '{mounted_splitter.name}' has missing or duplicate output-port identifiers.",
+                severity="error",
+                from_node_id=host.id,
+                details={"splitterId": mounted_splitter.id, "portIds": port_ids},
+            ))
+        if len(valid_target_ids) != len(target_ids) or len(set(valid_target_ids)) != len(valid_target_ids):
+            errors.append(TopologyIssue(
+                code="splitter_output_target_duplicate",
+                policy_code="invalid-reference",
+                message=f"Mounted splitter '{mounted_splitter.name}' assigns more than one output to the same network node.",
+                severity="error",
+                from_node_id=host.id,
+                details={"splitterId": mounted_splitter.id, "targetIds": target_ids},
+            ))
+        if set(valid_target_ids) != set(expected_output_targets) or len(valid_target_ids) != used_outputs:
+            errors.append(TopologyIssue(
+                code="splitter_output_mapping_incomplete",
+                policy_code="invalid-reference",
+                message=f"Mounted splitter '{mounted_splitter.name}' port assignments do not match all physical output connections from its host cabinet.",
+                severity="error",
+                from_node_id=host.id,
+                details={"splitterId": mounted_splitter.id, "mappedTargets": valid_target_ids, "physicalTargets": expected_output_targets},
+            ))
+        for target_id in target_ids:
+            if not isinstance(target_id, str):
+                errors.append(TopologyIssue(
+                    code="splitter_output_target_invalid",
+                    policy_code="invalid-reference",
+                    message=f"Mounted splitter '{mounted_splitter.name}' has an invalid output node reference.",
+                    severity="error",
+                    from_node_id=host.id,
+                    details={"splitterId": mounted_splitter.id, "connectedNodeId": str(target_id)},
+                ))
+                continue
+            if target_id not in nodes_by_id:
+                errors.append(TopologyIssue(
+                    code="splitter_output_target_invalid",
+                    policy_code="invalid-reference",
+                    message=f"Mounted splitter '{mounted_splitter.name}' references a missing output node.",
+                    severity="error",
+                    from_node_id=host.id,
+                    details={"splitterId": mounted_splitter.id, "connectedNodeId": target_id},
+                ))
+                continue
+            expected_type = NodeType.ODP if host.type == NodeType.ODC else NodeType.ONT
+            if nodes_by_id[target_id].type != expected_type or not any(edge.from_node_id == host.id and edge.to_node_id == target_id for edge in project.connections):
+                errors.append(TopologyIssue(
+                    code="splitter_output_topology_mismatch",
+                    policy_code="invalid-transition",
+                    message=f"Mounted splitter '{mounted_splitter.name}' output {target_id} does not match a physical connection from its host cabinet.",
+                    severity="error",
+                    from_node_id=host.id,
+                    details={"splitterId": mounted_splitter.id, "connectedNodeId": target_id, "expectedNodeType": expected_type.value},
+                ))
+        if capacity is not None and len(output_assignments) > capacity:
+            errors.append(TopologyIssue(
+                code="splitter_capacity_exceeded",
+                policy_code="capacity-exceeded",
+                message=f"Mounted splitter '{mounted_splitter.name}' maps {len(output_assignments)} output ports, exceeding capacity {capacity}.",
+                severity="error",
+                from_node_id=host.id,
+                details={"splitterId": mounted_splitter.id, "mappedOutputs": len(output_assignments), "capacity": capacity},
+            ))
+        if capacity is not None and used_outputs > capacity:
+            errors.append(TopologyIssue(code="splitter_capacity_exceeded", policy_code="capacity-exceeded", message=f"Mounted splitter '{mounted_splitter.name}' has capacity {capacity}, exceeded by {used_outputs} assigned outputs.", severity="error", from_node_id=host.id, details={"splitterId": mounted_splitter.id, "connectedOutputs": used_outputs, "capacity": capacity, "ponPortId": pon_port_id}))
+        elif used_outputs and capacity is None:
+            warnings.append(TopologyIssue(code="splitter_capacity_unknown", policy_code="capacity-unknown", message=f"Mounted splitter '{mounted_splitter.name}' has {used_outputs} assigned outputs but no configured ratio or rated capacity.", severity="warning", from_node_id=host.id, details={"splitterId": mounted_splitter.id, "connectedOutputs": used_outputs}))
+
+    # Enforce planned customer-to-ODP allocations separately from graph fan-out.
+    # A splitter may feed one ODP while serving several customers; counting only
+    # graph edges at the ODP would otherwise miss the per-ODP 8-customer limit.
+    planned_odp_counts: Dict[str, int] = {}
+    ont_customer_ids: Dict[str, List[str]] = {}
+    reverse_edges: Dict[str, List[str]] = {}
+    for connection in project.connections:
+        reverse_edges.setdefault(connection.to_node_id, []).append(connection.from_node_id)
+    for customer in project.customers:
+        ont_id = customer.ont_node_id
+        if ont_id:
+            ont_customer_ids.setdefault(ont_id, []).append(customer.id)
+        assigned_odp = customer.properties.get("plannedOdpNodeId") or customer.properties.get("odpNodeId") or customer.properties.get("odp_node_id")
+        if not isinstance(assigned_odp, str) or not assigned_odp.strip():
+            continue
+        odp = nodes_by_id.get(assigned_odp.strip())
+        if odp is None or odp.type != NodeType.ODP:
+            errors.append(TopologyIssue(code="customer_odp_assignment_invalid", policy_code="invalid-reference", message=f"Customer '{customer.name}' has an intended ODP assignment that does not reference an ODP node.", severity="error", details={"customerId": customer.id, "odpNodeId": assigned_odp}))
+            continue
+        planned_odp_counts[odp.id] = planned_odp_counts.get(odp.id, 0) + 1
+        if not ont_id or ont_id not in nodes_by_id or nodes_by_id[ont_id].type != NodeType.ONT:
+            errors.append(TopologyIssue(code="customer_ont_assignment_missing", policy_code="invalid-reference", message=f"Customer '{customer.name}' has a planned ODP but no valid ONT assignment.", severity="error", to_node_id=ont_id, details={"customerId": customer.id, "odpNodeId": odp.id}))
+            continue
+        upstream_odps = set()
+        pending = [ont_id]
+        visited = set()
+        while pending:
+            current = pending.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            current_node = nodes_by_id.get(current)
+            if current_node and current_node.type == NodeType.ODP:
+                upstream_odps.add(current)
+            pending.extend(reverse_edges.get(current, []))
+        if odp.id not in upstream_odps:
+            errors.append(TopologyIssue(code="customer_odp_assignment_mismatch", policy_code="invalid-reference", message=f"Customer '{customer.name}' is assigned to ODP '{odp.name}', but its ONT topology does not trace through that ODP.", severity="error", from_node_id=odp.id, to_node_id=ont_id, details={"customerId": customer.id}))
+    for ont_id, customer_ids in ont_customer_ids.items():
+        if len(customer_ids) > 1:
+            errors.append(TopologyIssue(code="ont_assigned_to_multiple_customers", policy_code="capacity-exceeded", message=f"ONT '{nodes_by_id[ont_id].name}' is assigned to {len(customer_ids)} customers; this design requires one ONT per customer.", severity="error", to_node_id=ont_id, details={"customerIds": customer_ids}))
+    for odp_id, output_count in planned_odp_counts.items():
+        if output_count > 8:
+            odp = nodes_by_id[odp_id]
+            errors.append(TopologyIssue(code="odp_customer_output_capacity_exceeded", policy_code="capacity-exceeded", message=f"ODP '{odp.name}' has {output_count} planned customer outputs; the design limit is 8.", severity="error", from_node_id=odp_id, details={"customerOutputs": output_count, "maxCustomerOutputs": 8}))
+
+    for node in project.nodes:
+        if node.type == NodeType.ODC:
+            required = node.properties.get("distributionFanoutPortsRequired")
+            capacity = node.properties.get("distributionFanoutCapacity", node.properties.get("distributionPortCapacity"))
+            try:
+                required_count = int(required) if required is not None else None
+                capacity_count = int(capacity) if capacity is not None else None
+            except (TypeError, ValueError):
+                required_count = None
+                capacity_count = None
+            if required_count is not None and capacity_count is not None and required_count > capacity_count:
+                errors.append(TopologyIssue(code="odc_fanout_capacity_exceeded", policy_code="capacity-exceeded", message=f"ODC '{node.name}' requires {required_count} distribution outputs, exceeding its configured capacity of {capacity_count}.", severity="error", from_node_id=node.id, details={"requiredOutputs": required_count, "capacity": capacity_count}))
+            elif node.properties.get("distributionFanoutCapacityStatus") == "unknown":
+                warnings.append(TopologyIssue(code="odc_fanout_capacity_unknown", policy_code="capacity-unknown", message=f"ODC '{node.name}' requires {required_count if required_count is not None else 'an unknown number of'} distribution outputs, but its rated port capacity is not recorded.", severity="warning", from_node_id=node.id, details={"requiredOutputs": required_count, "capacity": capacity_count}))
+        if node.type == NodeType.OLT:
+            required = node.properties.get("requiredPonPorts")
+            capacity = node.properties.get("ponPortCapacity", node.properties.get("ponPorts", node.properties.get("ponPortCount")))
+            try:
+                required_count = int(required) if required is not None else None
+                capacity_count = int(capacity) if capacity is not None else None
+            except (TypeError, ValueError):
+                required_count = None
+                capacity_count = None
+            if required_count is not None and capacity_count is not None and required_count > capacity_count:
+                errors.append(TopologyIssue(code="olt_pon_capacity_exceeded", policy_code="capacity-exceeded", message=f"OLT '{node.name}' requires {required_count} PON ports, exceeding its configured capacity of {capacity_count}.", severity="error", from_node_id=node.id, details={"requiredPonPorts": required_count, "capacity": capacity_count}))
+            elif node.properties.get("ponPortArchitectureStatus") == "unknown":
+                warnings.append(TopologyIssue(code="olt_pon_capacity_unknown", policy_code="capacity-unknown", message=f"OLT '{node.name}' requires {required_count if required_count is not None else 'an unknown number of'} PON ports, but its port architecture/capacity is not recorded.", severity="warning", from_node_id=node.id, details={"requiredPonPorts": required_count, "capacity": capacity_count}))
 
     # Physical span and ODP-to-house distance checks (max 300 m)
     from backend.app.engine.pole import resolve_span_geometry_and_length, _is_geographically_placed
@@ -1210,6 +1512,7 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
         "nodeTypeCounts": {t.value: sum(1 for n in project.nodes if n.type == t) for t in NodeType},
         "routerCount": sum(1 for n in project.nodes if n.type == NodeType.ROUTER),
         "hasCycles": len(cycles) > 0,
+        "plannedOdpCustomerOutputs": planned_odp_counts,
     }
 
     return TopologyValidationResult(
@@ -1282,7 +1585,10 @@ def validate_project_integrity(project: Project) -> List[ErrorDetail]:
             )
         cable_ids.add(cable.id)
 
-        if has_zero_length_route(cable.geometry.coordinates):
+        manual_route = cable.properties.get("routeStatus") == "manual_required"
+        if not cable.geometry.coordinates and not manual_route:
+            errors.append(ErrorDetail(field=f"cableSegments[{idx}].geometry.coordinates", message=f"Cable '{cable.name}' has no route geometry and is not marked for manual route planning."))
+        if cable.geometry.coordinates and has_zero_length_route(cable.geometry.coordinates):
             errors.append(ErrorDetail(
                 field=f"cableSegments[{idx}].geometry.coordinates",
                 message=f"Cable '{cable.name}' has zero geographic route length; provide at least one non-zero route segment.",
@@ -1317,6 +1623,8 @@ def validate_project_integrity(project: Project) -> List[ErrorDetail]:
         start_node = nodes_by_id.get(cable.start_node_id) if cable.start_node_id else None
         end_node = nodes_by_id.get(cable.end_node_id) if cable.end_node_id else None
         coords = cable.geometry.coordinates
+        if not coords and manual_route:
+            continue
         first_pt = coords[0]
         last_pt = coords[-1]
         TOLERANCE_METRES = 50.0

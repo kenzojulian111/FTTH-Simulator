@@ -1,9 +1,12 @@
 import type { NetworkNode, Project, TopologyConnection } from "./types";
+import { validatePortConnection } from "./devicePorts";
 
 export interface ConnectionDraft {
   fromNodeId: string;
   toNodeId: string;
   cableSegmentId: string;
+  fromPortId?: string | null;
+  toPortId?: string | null;
 }
 
 export type ConnectionIssueCode =
@@ -44,6 +47,12 @@ export function validateConnection(project: Project, draft: ConnectionDraft): Co
   else if (project.connections.some((connection) => sameConnection(connection, draft))) {
     code = "duplicate-link";
     message = "This directed connection already exists on the selected cable.";
+  } else if (source && destination && (draft.fromPortId || draft.toPortId)) {
+    const portCheck = validatePortConnection(source, draft.fromPortId, destination, draft.toPortId, project.connections);
+    if (!portCheck.valid) {
+      code = "capacity-exceeded";
+      message = portCheck.message;
+    }
   }
 
   return { valid: code === null, code, message };
@@ -62,7 +71,17 @@ export type ConnectionCreation = { ok: true; connection: TopologyConnection } | 
 export function createValidatedConnection(project: Project, draft: ConnectionDraft, id: string): ConnectionCreation {
   const validation = validateConnection(project, draft);
   if (!validation.valid) return { ok: false, validation };
-  return { ok: true, connection: { id, fromNodeId: draft.fromNodeId, toNodeId: draft.toNodeId, cableSegmentId: draft.cableSegmentId } };
+  return {
+    ok: true,
+    connection: {
+      id,
+      fromNodeId: draft.fromNodeId,
+      toNodeId: draft.toNodeId,
+      cableSegmentId: draft.cableSegmentId,
+      ...(draft.fromPortId ? { fromPortId: draft.fromPortId } : {}),
+      ...(draft.toPortId ? { toPortId: draft.toPortId } : {}),
+    },
+  };
 }
 
 function sameConnection(connection: TopologyConnection, draft: ConnectionDraft): boolean {

@@ -53,6 +53,9 @@ def has_zero_length_route(coordinates: Sequence[Tuple[float, float]]) -> bool:
 def update_cable_lengths(cables: List[CableSegment]) -> List[CableSegment]:
     """Compute and update the authoritative length_m for all cable segments."""
     for cable in cables:
+        if cable.properties.get("routeStatus") == "manual_required" and not cable.geometry.coordinates:
+            cable.length_m = None
+            continue
         raw_length = calculate_route_length(cable.geometry.coordinates)
         cable.length_m = round(raw_length, 2)
     return cables

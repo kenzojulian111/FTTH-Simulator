@@ -173,7 +173,9 @@ class LineGeometry(CamelModel):
     @field_validator("coordinates")
     @classmethod
     def validate_coordinates(cls, coords: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-        if len(coords) < 2:
+        # An empty route is permitted only as a data representation for a
+        # manually-planned connection. Validation enforces that provenance.
+        if len(coords) == 1:
             raise ValueError("A cable LineString must have at least two coordinates")
         for idx, pt in enumerate(coords):
             if len(pt) != 2:
@@ -274,6 +276,12 @@ class CableSegment(CamelModel):
     properties: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=current_utc_timestamp)
     updated_at: str = Field(default_factory=current_utc_timestamp)
+
+    @model_validator(mode="after")
+    def require_manual_provenance_for_empty_route(self) -> "CableSegment":
+        if not self.geometry.coordinates and self.properties.get("routeStatus") != "manual_required":
+            raise ValueError("An empty cable route must be explicitly marked routeStatus='manual_required'")
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -399,6 +407,20 @@ class OpticalComponent(CamelModel):
         return self
 
 
+class DevicePort(CamelModel):
+    """Device port specification and current connection state."""
+    id: str
+    label: str
+    port_type: str
+    node_id: str
+    capacity: Optional[int] = 1
+    status: Literal["available", "connected", "disabled"] = "available"
+    connected_node_id: Optional[str] = None
+    connected_node_name: Optional[str] = None
+    connected_port_id: Optional[str] = None
+    connection_id: Optional[str] = None
+
+
 class TopologyConnection(CamelModel):
     """Logical connection linking two network nodes across a cable segment."""
     id: str
@@ -407,6 +429,8 @@ class TopologyConnection(CamelModel):
     cable_segment_id: str
     medium: Optional[Literal["fiber", "copper", "wireless"]] = None
     connection_type: Optional[Literal["optical", "ethernet"]] = None
+    from_port_id: Optional[str] = None
+    to_port_id: Optional[str] = None
 
     @field_validator("to_node_id")
     @classmethod
@@ -822,8 +846,8 @@ class ProjectListResponse(CamelModel):
 class OpticalLinkResult(CamelModel):
     """Per-link optical budget evaluation result."""
     connection_id: str
-    length_m: float
-    loss_db: float
+    length_m: Optional[float]
+    loss_db: Optional[float]
     # Per-link power is only known when the link starts at a transmitter.
     # Passive links are diagnostic loss records, not independent power budgets.
     received_power_dbm: Optional[float] = None
@@ -856,7 +880,7 @@ class OpticalPathSegment(CamelModel):
     to_node_id: str
     to_node_name: str
     to_node_type: str
-    length_m: float
+    length_m: Optional[float]
     route_length_contribution_m: Optional[float] = None
     attenuation_db_per_km: Optional[float] = None
     fiber_type: Optional[str] = None
@@ -880,6 +904,7 @@ class IntermediateOpticalResult(CamelModel):
     node_name: str
     node_type: Literal["odc", "odp"]
     status: Literal["estimated", "unknown", "ambiguous", "unreachable"]
+    physical_route_status: Literal["planned", "unverified", "verified"] = "planned"
     source_olt_id: Optional[str] = None
     node_ids: List[str] = Field(default_factory=list)
     connection_ids: List[str] = Field(default_factory=list)
@@ -968,6 +993,7 @@ class OpticalPathResult(CamelModel):
     status: Literal["pass", "fail", "unknown"]
     connectivity_status: Literal["connected", "disconnected", "invalid_topology", "ambiguous"] = "connected"
     optical_budget_status: Literal["pass", "fail", "unknown"] = "unknown"
+    physical_route_status: Literal["planned", "unverified", "verified"] = "planned"
     status_reason: Optional[str] = None
     diagnostics: List[OpticalDiagnostic] = Field(default_factory=list)
     calculation_limitations: List[str] = Field(default_factory=list)
@@ -1068,6 +1094,8 @@ class ConnectionValidationRequest(CamelModel):
     connection_id: Optional[str] = None
     medium: Optional[Literal["fiber", "copper", "wireless"]] = None
     connection_type: Optional[Literal["optical", "ethernet"]] = None
+    from_port_id: Optional[str] = None
+    to_port_id: Optional[str] = None
     project: Optional[Project] = None
 
 

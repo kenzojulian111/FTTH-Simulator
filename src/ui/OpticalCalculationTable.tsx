@@ -9,6 +9,8 @@ interface Props {
   totalDesignAllowanceDb: number | null | undefined;
   powerLabel: string;
   powerDbm: number | null | undefined;
+  profileId?: string | null;
+  parameterSources?: Record<string, string>;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -18,7 +20,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 const value = (number: number | null | undefined, unit: string) =>
   number == null || !Number.isFinite(number) ? "Unknown" : `${formatReportNumber(number)} ${unit}`;
 
-export function OpticalCalculationTable({ rows, categoryLossesDb, physicalLossDb, designMarginDb, totalDesignAllowanceDb, powerLabel, powerDbm }: Props) {
+export function OpticalCalculationTable({ rows, categoryLossesDb, physicalLossDb, designMarginDb, totalDesignAllowanceDb, powerLabel, powerDbm, profileId, parameterSources }: Props) {
   const equation = (row: OpticalLossBreakdownItem) => {
     const quantity = row.calculationQuantity ?? row.quantity;
     const unit = row.calculationQuantityUnit ?? row.quantityUnit;
@@ -47,6 +49,10 @@ export function OpticalCalculationTable({ rows, categoryLossesDb, physicalLossDb
         <tr className="report-grand-total"><th colSpan={4}>Total design attenuation allowance</th><td className="numeric">{value(totalDesignAllowanceDb, "dB")}</td><td colSpan={2} /></tr>
       </tfoot>
     </table></div>
+    {(profileId || (parameterSources && Object.keys(parameterSources).length > 0)) && <p className="report-source-note">
+      {profileId && <>Optical profile: {profileId}{profileId.toLowerCase().includes("illustrative") ? " (illustrative planning assumptions)" : ""}. </>}
+      {parameterSources && Object.keys(parameterSources).length > 0 && <>Parameter provenance: {Object.entries(parameterSources).map(([name, source]) => `${name} (${source.replace(/_/g, " ")})`).join(" · ")}</>}
+    </p>}
     <p className="component-loss-summary"><strong>{powerLabel}:</strong> {value(powerDbm, "dBm")}. Physical power uses transmitter power minus physical attenuation; configured design margin is not subtracted.</p>
   </section>;
 }
