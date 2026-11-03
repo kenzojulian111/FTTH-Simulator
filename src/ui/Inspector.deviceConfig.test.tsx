@@ -2,8 +2,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEmptyProject } from "../domain/project";
-import type { OpticalBudgetResult } from "../domain/types";
+import type { OpticalBudgetResult, TopologyValidationResult } from "../domain/types";
 import { Inspector } from "./Inspector";
+import { TopologyValidationPanel } from "./TopologyValidationPanel";
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
 
@@ -573,5 +574,285 @@ describe("Inspector Device Configuration & Port Management", () => {
       }
     });
     expect(onCableAttributes).toHaveBeenCalledWith("cable-opt-1", "feeder", 24, { fiberAttenuationDbPerKm: 0.22 });
+  });
+
+  it("dynamically renders specialized inspectors for ODP, Pole, Customer, and Empty State without leaking unrelated sections", () => {
+    const project = createEmptyProject("Dynamic Node Inspector Test");
+    const point = { type: "Point" as const, coordinates: [115.2, -8.65] as [number, number] };
+    project.nodes = [
+      {
+        id: "odp-test",
+        name: "ODP Alpha",
+        type: "odp",
+        location: point,
+        properties: { splitterRatio: "1:8", outputPorts: 8 },
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+      {
+        id: "pole-test",
+        name: "Pole 01",
+        type: "pole",
+        location: point,
+        properties: { poleHeightM: 9, poleType: "Concrete" },
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+      {
+        id: "ont-test",
+        name: "ONT Home 1",
+        type: "ont",
+        location: point,
+        properties: {},
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+    ];
+    project.customers = [
+      {
+        id: "cust-test",
+        name: "Pak Budi",
+        address: "Jl. Sudirman No. 5",
+        location: point,
+        status: "connected",
+        ontNodeId: "ont-test",
+        properties: {},
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+    ];
+
+    const noop = vi.fn();
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+
+    // 1. Empty state when nothing is selected
+    act(() =>
+      root?.render(
+        <Inspector
+          project={project}
+          selection={null}
+          onRename={noop}
+          onCustomerAddress={noop}
+          onCustomerOnt={noop}
+          onCustomerStatus={noop}
+          onCableAttributes={noop}
+          onRouterConfiguration={noop}
+          onInvalidFiberCount={noop}
+          onDelete={noop}
+        />,
+      ),
+    );
+    expect(host.textContent).toContain("Nothing selected");
+
+    // 2. ODP Inspector
+    act(() =>
+      root?.render(
+        <Inspector
+          project={project}
+          selection={{ kind: "node", id: "odp-test" }}
+          onRename={noop}
+          onCustomerAddress={noop}
+          onCustomerOnt={noop}
+          onCustomerStatus={noop}
+          onCableAttributes={noop}
+          onRouterConfiguration={noop}
+          onInvalidFiberCount={noop}
+          onDelete={noop}
+        />,
+      ),
+    );
+    expect(host.querySelector("[data-inspector-type='odp']")).not.toBeNull();
+    expect(host.textContent).toContain("ODP SUMMARY");
+    expect(host.textContent).toContain("SPLITTER CONFIGURATION");
+    expect(host.textContent).toContain("OUTPUT PORTS");
+    expect(host.textContent).not.toContain("PON technology");
+
+    // 3. Pole Inspector
+    act(() =>
+      root?.render(
+        <Inspector
+          project={project}
+          selection={{ kind: "node", id: "pole-test" }}
+          onRename={noop}
+          onCustomerAddress={noop}
+          onCustomerOnt={noop}
+          onCustomerStatus={noop}
+          onCableAttributes={noop}
+          onRouterConfiguration={noop}
+          onInvalidFiberCount={noop}
+          onDelete={noop}
+        />,
+      ),
+    );
+    expect(host.querySelector("[data-inspector-type='pole']")).not.toBeNull();
+    expect(host.textContent).toContain("LOCATION");
+    expect(host.textContent).toContain("CABLE SPAN");
+    expect(host.textContent).toContain("CONNECTED CABLES");
+    expect(host.textContent).not.toContain("SPLITTER CONFIGURATION");
+
+    // 4. Customer Inspector
+    act(() =>
+      root?.render(
+        <Inspector
+          project={project}
+          selection={{ kind: "customer", id: "cust-test" }}
+          onRename={noop}
+          onCustomerAddress={noop}
+          onCustomerOnt={noop}
+          onCustomerStatus={noop}
+          onCableAttributes={noop}
+          onRouterConfiguration={noop}
+          onInvalidFiberCount={noop}
+          onDelete={noop}
+        />,
+      ),
+    );
+    expect(host.querySelector("[data-inspector-type='customer']")).not.toBeNull();
+    expect(host.textContent).toContain("CUSTOMER INFORMATION");
+    expect(host.textContent).toContain("ASSIGNED ONT");
+    expect(host.textContent).toContain("DROP CABLE");
+  });
+
+  it("renders TopologyValidationPanel collapsed by default, groups issues by category, and supports Expand All / Collapse All and detail inspection", () => {
+    const project = createEmptyProject("Validation Panel Test");
+    const point = { type: "Point" as const, coordinates: [115.2, -8.65] as [number, number] };
+    project.nodes = [
+      {
+        id: "olt-1",
+        name: "OLT Main",
+        type: "olt",
+        location: point,
+        properties: {},
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+      {
+        id: "odc-1",
+        name: "ODC Main",
+        type: "odc",
+        location: point,
+        properties: {},
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+    ];
+    project.cableSegments = [
+      {
+        id: "cab-1",
+        name: "Feeder Cable Alpha",
+        cableType: "feeder",
+        fiberCount: 12,
+        geometry: { type: "LineString", coordinates: [point.coordinates, point.coordinates] },
+        lengthM: 120,
+        startNodeId: "olt-1",
+        endNodeId: "odc-1",
+        properties: {},
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+    ];
+
+    const validation: TopologyValidationResult = {
+      valid: false,
+      errors: [
+        {
+          severity: "error",
+          code: "invalid_connection_direction",
+          message: "Downstream connection reversed between OLT Main and ODC Main",
+          fromNodeId: "olt-1",
+          toNodeId: "odc-1",
+        },
+      ],
+      warnings: [
+        {
+          severity: "warning",
+          code: "missing_physical_cable_route",
+          message: "Feeder Cable Alpha does not follow a verified pole route",
+          cableSegmentId: "cab-1",
+          fromNodeId: "olt-1",
+          toNodeId: "odc-1",
+        },
+        {
+          severity: "warning",
+          code: "port_capacity_exceeded",
+          message: "PON port capacity exceeded on OLT Main",
+          fromNodeId: "olt-1",
+        },
+      ],
+      summary: {},
+    };
+
+    const onSelectEntity = vi.fn();
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+
+    act(() =>
+      root?.render(
+        <TopologyValidationPanel
+          validation={validation}
+          project={project}
+          onSelectEntity={onSelectEntity}
+        />,
+      ),
+    );
+
+    // 1. Default state MUST be COLLAPSED
+    const summaryTrigger = host.querySelector(".validation-summary-trigger") as HTMLButtonElement;
+    expect(summaryTrigger).not.toBeNull();
+    expect(summaryTrigger.getAttribute("aria-expanded")).toBe("false");
+    expect(host.textContent).toContain("Invalid");
+    expect(host.textContent).toContain("1 error");
+    expect(host.textContent).toContain("2 warnings");
+    expect(host.querySelector(".validation-collapsible-body")).toBeNull();
+
+    // 2. Click summary header to expand panel
+    act(() => {
+      summaryTrigger.click();
+    });
+    expect(summaryTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector(".validation-collapsible-body")).not.toBeNull();
+    expect(host.textContent).toContain("Topology errors");
+    expect(host.textContent).toContain("Route warnings");
+    expect(host.textContent).toContain("Port capacity warnings");
+
+    // 3. Test Collapse All and Expand All buttons
+    const collapseAllBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "Collapse All");
+    const expandAllBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "Expand All");
+    expect(collapseAllBtn).toBeDefined();
+    expect(expandAllBtn).toBeDefined();
+
+    act(() => {
+      collapseAllBtn?.click();
+    });
+    expect(host.querySelectorAll(".validation-category-body").length).toBe(0);
+
+    act(() => {
+      expandAllBtn?.click();
+    });
+    expect(host.querySelectorAll(".validation-category-body").length).toBe(3);
+
+    // 4. Expand an individual route warning to inspect cable name & target node details
+    const routeIssueToggle = Array.from(host.querySelectorAll(".validation-issue-toggle")).find((b) =>
+      b.textContent?.includes("Feeder Cable Alpha does not follow"),
+    ) as HTMLButtonElement | undefined;
+    expect(routeIssueToggle).toBeDefined();
+
+    act(() => {
+      routeIssueToggle?.click();
+    });
+    expect(host.textContent).toContain("missing_physical_cable_route");
+    expect(host.textContent).toContain("Feeder Cable Alpha");
+    expect(host.textContent).toContain("ODC Main");
+
+    const routeIssueItem = routeIssueToggle?.closest(".validation-issue-item");
+    const selectBtn = routeIssueItem?.querySelector(".validation-issue-actions button") as HTMLButtonElement | undefined;
+    expect(selectBtn).toBeDefined();
+    act(() => {
+      selectBtn?.click();
+    });
+    expect(onSelectEntity).toHaveBeenCalledWith({ kind: "cable", id: "cab-1" });
   });
 });

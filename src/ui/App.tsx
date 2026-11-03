@@ -17,6 +17,7 @@ import { NetworkMap } from "./NetworkMap";
 import { LocationSearch } from "./LocationSearch";
 import { Inspector } from "./Inspector";
 import { IntermediateOpticalResults } from "./IntermediateOpticalResults";
+import { TopologyValidationPanel } from "./TopologyValidationPanel";
 import { OpticalSettingsPanel } from "./OpticalSettingsPanel";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { ConnectionDialog } from "./ConnectionDialog";
@@ -667,11 +668,16 @@ export function App() {
             </div>;
           })}
           {opticalResult && <IntermediateOpticalResults intermediateNodes={opticalResult.intermediateNodes ?? []} />}
-          {topologyValidation && <div className={`topology-validation-summary ${topologyValidation.valid ? "valid" : "invalid"}`} role="status">
-            <strong>{topologyValidation.valid ? "Project topology valid" : `Project topology has ${topologyValidation.errors.length} issue${topologyValidation.errors.length === 1 ? "" : "s"}`}</strong>
-            {topologyValidation.errors.map((item, index) => <div className="topology-validation-issue" key={`${item.code}-${index}`}><span>{item.message}</span>{(item.fromNodeId || item.toNodeId || item.cableSegmentId) && <button type="button" onClick={() => { const nodeId = item.fromNodeId ?? item.toNodeId; const selection = item.cableSegmentId ? { kind: "cable" as const, id: item.cableSegmentId } : nodeId ? { kind: "node" as const, id: nodeId } : null; if (selection) { setWorkspaceMode("geographic"); dispatch({ type: "select", selection }); } }}>Select affected object</button>}</div>)}
-            {topologyValidation.warnings.map((item, index) => <p className="topology-validation-warning" key={`${item.code}-${index}`}>Warning: {item.message}</p>)}
-          </div>}
+          {topologyValidation && (
+            <TopologyValidationPanel
+              validation={topologyValidation}
+              project={state.project}
+              onSelectEntity={(selection) => {
+                setWorkspaceMode("geographic");
+                dispatch({ type: "select", selection });
+              }}
+            />
+          )}
           {topologyValidationError && <p className="notice error" role="alert">Topology validation could not complete: {topologyValidationError}</p>}
           <OpticalSettingsPanel config={state.project.settings.opticalBudget} onChange={(config) => dispatch({ type: "optical-budget-config", config })} />
           <PoleSpanSettingsPanel settings={state.project.settings.poleSpanPlanning} onChange={(settings) => dispatch({ type: "pole-span-settings", settings })} />
