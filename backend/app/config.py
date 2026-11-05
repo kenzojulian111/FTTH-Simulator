@@ -8,6 +8,8 @@ def cors_policy(environment: str | None = None, configured_origins: str | None =
     """Return exact CORS origins; non-development deployments must configure them."""
     env = (environment if environment is not None else os.getenv("FTTH_ENVIRONMENT", "development")).strip().lower()
     raw = configured_origins if configured_origins is not None else os.getenv("CORS_ALLOWED_ORIGINS", "")
+    if not raw.strip() and configured_origins is None:
+        raw = os.getenv("RENDER_EXTERNAL_URL", "")
     if not raw.strip():
         if env in {"development", "dev", "local", "test"}:
             return ["http://localhost:5173", "http://127.0.0.1:5173"], True

@@ -9,5 +9,7 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: FTTH_ENVIRONMENT
+        value: production
       - key: FTTH_DATABASE_URL
         value: sqlite:///./ftth_simulator.db

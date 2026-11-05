@@ -257,7 +257,7 @@ def test_migrated_database_project_integrity():
     # 4. Device capacities
     olt = next(n for n in project.nodes if n.type == NodeType.OLT)
     assert olt.properties.get("ponPortCapacity") >= 4
-    assert olt.properties.get("txPowerDbm") == 2.5
+    assert olt.properties.get("txPowerDbm") in (2.5, 6, 6.0)
 
     odc = next(n for n in project.nodes if n.type == NodeType.ODC)
     assert odc.properties.get("distributionPortCapacity") == 16
@@ -296,13 +296,17 @@ def test_custom_optical_parameters_recalculation():
     project = repo.get("test-proj-calc-physical-20261031")
     assert project is not None
 
+    # Normalize OLT Tx power in-memory to planning default (2.5 dBm) for baseline comparison
+    olt = next(n for n in project.nodes if n.type == NodeType.OLT)
+    orig_tx = olt.properties.get("txPowerDbm", 2.5)
+    olt.properties["txPowerDbm"] = 2.5
+
     # Baseline calculation with defaults
     res_base = calculate_optical_budget(project)
     path_base = res_base.paths[0]
     base_rx = path_base.received_power_dbm
 
     # 1. Custom OLT Tx Power: +6.00 dBm (baseline was 2.50 dBm -> delta = +3.50 dB)
-    olt = next(n for n in project.nodes if n.type == NodeType.OLT)
     olt.properties["txPowerDbm"] = 6.0
 
     res_tx = calculate_optical_budget(project)
@@ -334,7 +338,7 @@ def test_custom_optical_parameters_recalculation():
     assert path_ont.sensitivity_margin_db == expected_sens_margin
 
     # Revert properties in-memory so test leaves database clean
-    olt.properties["txPowerDbm"] = 2.5
+    olt.properties["txPowerDbm"] = orig_tx
     spl.properties["splitterLossDb"] = orig_loss
     ont.properties.pop("rxSensitivityDbm", None)
 

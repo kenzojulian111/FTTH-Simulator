@@ -19,6 +19,14 @@ def test_cors_policy_has_local_defaults_and_requires_explicit_nonlocal_origins()
     ]
 
 
+def test_cors_policy_accepts_render_external_url_in_production(monkeypatch):
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://ftth-simulator.onrender.com")
+    origins, credentials = cors_policy("production")
+    assert origins == ["https://ftth-simulator.onrender.com"]
+    assert credentials is True
+
+
 @pytest.mark.parametrize("value", ["*", "https://planner.example/path", "ftp://planner.example", "https://user@planner.example", "https://planner.example:bad"])
 def test_cors_policy_rejects_wildcard_or_non_origin_values(value):
     with pytest.raises(RuntimeError, match="exact http"):

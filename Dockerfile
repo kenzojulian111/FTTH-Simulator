@@ -33,7 +33,8 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=10000
+    PORT=10000 \
+    FTTH_DATABASE_URL=sqlite:///./ftth_simulator.db
 
 WORKDIR /app
 
