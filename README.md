@@ -94,3 +94,25 @@ docs/      Project specifications, API contract, and engineering notes
 ```
 
 See [docs/API_CONTRACT.md](docs/API_CONTRACT.md) for endpoint and data details, and [docs/OPERATIONS.md](docs/OPERATIONS.md) for backend operations notes.
+
+## Single-Container Docker & Render Free Deployment
+
+The repository includes a multi-stage [`Dockerfile`](Dockerfile) that builds the React + Vite frontend (`VITE_API_BASE_URL=/api/v1`) and serves both the SPA (`dist/`) and FastAPI backend (`backend.app.main:app`) from a single container bound to `0.0.0.0:$PORT`.
+
+### Local Docker build & run
+
+```bash
+docker build -t ftth-simulator:latest .
+docker run --rm -p 10000:10000 -e PORT=10000 ftth-simulator:latest
+```
+
+Once running:
+- **Frontend SPA**: `http://localhost:10000/`
+- **Health check**: `http://localhost:10000/health` and `http://localhost:10000/api/v1/health`
+- **Interactive API docs**: `http://localhost:10000/docs`
+- **REST API v1**: `http://localhost:10000/api/v1/...`
+
+### Ephemeral SQLite storage on Render Free
+
+> **Important:** Render Free web services use an **ephemeral container filesystem** and do not support persistent disks. Although SQLite (`ftth_simulator.db`) works during the lifetime of a running container instance, **any newly created or modified project data will be lost whenever the container restarts, spins down due to inactivity, is replaced, or is redeployed**. Do not rely on Render Free SQLite storage for permanent project retention.
+

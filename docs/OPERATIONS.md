@@ -23,3 +23,11 @@ configure one worker and one replica while the public provider is selected.
 Production deployments must set `FTTH_ENVIRONMENT=production` and an explicit
 `CORS_ALLOWED_ORIGINS` list. CORS does not authenticate project write APIs. Keep
 them on a trusted network or put them behind an authenticated access layer.
+
+## Render Free & Single-Container Docker Notes
+
+When deployed as a single-container Docker web service on Render Free:
+- Uvicorn binds to `0.0.0.0` and the `PORT` environment variable injected by Render (`uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1`).
+- FastAPI serves the compiled Vite frontend from `/app/dist`, while preserving `/health`, `/docs`, and all `/api/v1/*` routes.
+- **Ephemeral SQLite Persistence Warning**: Render Free instances have an ephemeral filesystem and do not support persistent disks. SQLite database writes (`ftth_simulator.db`) only persist for the life of the current container process and **do not survive** container restarts, free-tier spin-down/spin-up cycles, instance replacements, or redeployments.
+

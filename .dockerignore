@@ -1,0 +1,14 @@
+.git
+.venv
+node_modules
+dist
+.pytest_cache
+**/__pycache__
+*.pyc
+*.tsbuildinfo
+*.backup*
+src/ui (Copy)
+reports
+.env
+.env.*
+!.env.example

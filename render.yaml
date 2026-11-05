@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ftth-simulator
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    # IMPORTANT: Render Free uses an ephemeral container filesystem (no persistent disk).
+    # SQLite project data stored in ftth_simulator.db does NOT survive container replacement, spin-down, or redeployment.
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: FTTH_DATABASE_URL
+        value: sqlite:///./ftth_simulator.db

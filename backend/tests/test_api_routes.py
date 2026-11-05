@@ -15,6 +15,26 @@ def test_health_check_endpoints(client: TestClient):
     assert res_api.json()["status"] == "ok"
 
 
+def test_docs_and_spa_frontend_serving(client: TestClient):
+    """Verify /docs, root SPA index.html, SPA client-route fallback, and /api/v1 404 isolation."""
+    res_docs = client.get("/docs")
+    assert res_docs.status_code == 200
+    assert "swagger-ui" in res_docs.text.lower() or "openapi" in res_docs.text.lower()
+
+    res_root = client.get("/")
+    assert res_root.status_code == 200
+    assert "<!doctype html>" in res_root.text.lower()
+
+    res_spa_route = client.get("/workspace/logical-topology")
+    assert res_spa_route.status_code == 200
+    assert "<!doctype html>" in res_spa_route.text.lower()
+
+    res_unknown_api = client.get("/api/v1/unknown-endpoint")
+    assert res_unknown_api.status_code == 404
+    assert res_unknown_api.json()["error"]["code"] == "not_found"
+
+
+
 def test_project_crud_lifecycle(client: TestClient, sample_project: Project):
     """Verify full CRUD lifecycle and camelCase JSON contracts."""
     project_id = sample_project.id
