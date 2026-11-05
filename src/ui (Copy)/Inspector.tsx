@@ -1116,7 +1116,7 @@ export function Inspector({
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={onRecalculate}
               >
-                ⚡ Recalculate Optical Budget
+                Recalculate Optical Budget
               </button>
             )}
             <p className="hint">Leave blank to use the optical profile planning default for the selected ratio, or enter a custom insertion loss (dB).</p>
@@ -1254,7 +1254,7 @@ export function Inspector({
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={onRecalculate}
               >
-                ⚡ Recalculate Optical Budget
+                Recalculate Optical Budget
               </button>
             )}
           </section>
@@ -1305,7 +1305,7 @@ export function Inspector({
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={onRecalculate}
               >
-                ⚡ Recalculate Optical Budget
+                Recalculate Optical Budget
               </button>
             )}
           </section>
@@ -1436,7 +1436,7 @@ export function Inspector({
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={onRecalculate}
               >
-                ⚡ Recalculate Optical Budget
+                Recalculate Optical Budget
               </button>
             )}
           </section>
@@ -1669,7 +1669,7 @@ export function Inspector({
                 style={{ marginTop: 8, width: "100%" }}
                 onClick={onRecalculate}
               >
-                ⚡ Recalculate Optical Budget
+                Recalculate Optical Budget
               </button>
             )}
           </section>
@@ -2041,7 +2041,7 @@ export function Inspector({
             style={{ marginTop: 8, width: "100%" }}
             onClick={onRecalculate}
           >
-            ⚡ Recalculate Optical Budget
+            Recalculate Optical Budget
           </button>
         )}
       </details>

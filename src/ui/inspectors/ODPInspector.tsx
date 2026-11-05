@@ -370,7 +370,7 @@ export function ODPInspector({
             className="secondary-button full-width-btn"
             onClick={onRecalculate}
           >
-            ⚡ Recalculate Optical Budget
+            Recalculate Optical Budget
           </button>
         )}
       </InspectorSection>

@@ -237,7 +237,7 @@ export function SplitterInspector({
             className="secondary-button full-width-btn"
             onClick={onRecalculate}
           >
-            ⚡ Recalculate Optical Budget
+            Recalculate Optical Budget
           </button>
         )}
         <p className="hint">Leave blank to use the optical profile planning default for the selected ratio, or enter a custom insertion loss (dB).</p>

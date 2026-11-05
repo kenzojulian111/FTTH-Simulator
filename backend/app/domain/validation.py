@@ -1724,7 +1724,6 @@ def validate_project_integrity(project: Project) -> List[ErrorDetail]:
                     )
                 )
 
-    # 4. Check topology connections
     connection_ids: Set[str] = set()
     seen_connections: Set[Tuple[str, str, str]] = set()
 
@@ -1738,7 +1737,6 @@ def validate_project_integrity(project: Project) -> List[ErrorDetail]:
             )
         connection_ids.add(conn.id)
 
-        # Self-link validation
         if conn.from_node_id == conn.to_node_id:
             errors.append(
                 ErrorDetail(

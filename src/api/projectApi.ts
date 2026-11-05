@@ -101,6 +101,6 @@ export function createMemoryProjectApi(initial?: Project): ProjectApi {
 }
 
 export function createProjectApi(): ProjectApi {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL;
-  return baseUrl ? createHttpProjectApi(baseUrl) : createMemoryProjectApi();
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
+  return createHttpProjectApi(baseUrl);
 }
