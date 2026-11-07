@@ -346,4 +346,226 @@ describe("engineering reports", () => {
     act(() => inspectBtn?.click());
     expect(onSelectEntity).toHaveBeenCalledWith({ kind: "node", id: "ont" });
   });
+
+  it("renders all 8 engineering report sections with multi-branch ODC/ODP statistics, all ONTs, cable analysis, and PASS assessment", () => {
+    const project = createEmptyProject("Multi-Branch FTTH Project");
+    const point = { type: "Point" as const, coordinates: [115.2, -8.6] as [number, number] };
+    project.nodes = [
+      { id: "olt-1", type: "olt", name: "OLT Central", location: point, properties: { txPowerDbm: 3, ponPortCapacity: 4 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "odc-1", type: "odc", name: "ODC Main", location: point, properties: { feederPortCapacity: 2, distributionPortCapacity: 8 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "odp-1", type: "odp", name: "ODP North", location: point, properties: { splitterRatio: "1:8", splitterLossDb: 10.5 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "odp-2", type: "odp", name: "ODP South", location: point, properties: { splitterRatio: "1:16", splitterLossDb: 13.8 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "ont-1", type: "ont", name: "ONT Alpha", location: point, properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "ont-2", type: "ont", name: "ONT Beta", location: point, properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "ont-3", type: "ont", name: "ONT Gamma", location: point, properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt },
+    ];
+    project.cableSegments = [
+      { id: "c-feeder", name: "Feeder Core 01", cableType: "feeder", fiberCount: 48, geometry: { type: "LineString", coordinates: [[115.2, -8.6], [115.21, -8.6]] }, lengthM: 1200, properties: { cableCategory: "feeder", attenuationDbPerKm: 0.35 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "c-dist-1", name: "Dist North 01", cableType: "distribution", fiberCount: 24, geometry: { type: "LineString", coordinates: [[115.21, -8.6], [115.215, -8.6]] }, lengthM: 500, properties: { cableCategory: "distribution", attenuationDbPerKm: 0.35 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "c-dist-2", name: "Dist South 02", cableType: "distribution", fiberCount: 24, geometry: { type: "LineString", coordinates: [[115.21, -8.6], [115.22, -8.6]] }, lengthM: 800, properties: { cableCategory: "distribution", attenuationDbPerKm: 0.35 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "c-drop-1", name: "Drop Alpha", cableType: "drop", fiberCount: 2, geometry: { type: "LineString", coordinates: [[115.215, -8.6], [115.216, -8.6]] }, lengthM: 100, properties: { cableCategory: "drop", attenuationDbPerKm: 0.4 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "c-drop-2", name: "Drop Beta", cableType: "drop", fiberCount: 2, geometry: { type: "LineString", coordinates: [[115.215, -8.6], [115.217, -8.6]] }, lengthM: 150, properties: { cableCategory: "drop", attenuationDbPerKm: 0.4 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "c-drop-3", name: "Drop Gamma", cableType: "drop", fiberCount: 2, geometry: { type: "LineString", coordinates: [[115.22, -8.6], [115.222, -8.6]] }, lengthM: 200, properties: { cableCategory: "drop", attenuationDbPerKm: 0.4 }, createdAt: project.createdAt, updatedAt: project.updatedAt },
+    ];
+    project.connections = [
+      { id: "conn-f1", fromNodeId: "olt-1", toNodeId: "odc-1", cableSegmentId: "c-feeder", fromPortId: "PON-1", toPortId: "IN-01" },
+      { id: "conn-d1", fromNodeId: "odc-1", toNodeId: "odp-1", cableSegmentId: "c-dist-1", fromPortId: "OUT-01", toPortId: "IN" },
+      { id: "conn-d2", fromNodeId: "odc-1", toNodeId: "odp-2", cableSegmentId: "c-dist-2", fromPortId: "OUT-02", toPortId: "IN" },
+      { id: "conn-dr1", fromNodeId: "odp-1", toNodeId: "ont-1", cableSegmentId: "c-drop-1", fromPortId: "OUT-1", toPortId: "PON-IN" },
+      { id: "conn-dr2", fromNodeId: "odp-1", toNodeId: "ont-2", cableSegmentId: "c-drop-2", fromPortId: "OUT-2", toPortId: "PON-IN" },
+      { id: "conn-dr3", fromNodeId: "odp-2", toNodeId: "ont-3", cableSegmentId: "c-drop-3", fromPortId: "OUT-1", toPortId: "PON-IN" },
+    ];
+    project.customers = [
+      { id: "cust-1", name: "Subscriber Alpha", address: "Blok A1", location: point, status: "connected", ontNodeId: "ont-1", properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "cust-2", name: "Subscriber Beta", address: "Blok A2", location: point, status: "connected", ontNodeId: "ont-2", properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt },
+      { id: "cust-3", name: "Subscriber Gamma", address: "Blok B1", location: point, status: "connected", ontNodeId: "ont-3", properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt },
+    ];
+
+    const multiResult: OpticalBudgetResult = {
+      projectId: project.id,
+      calculatedAt: "2026-10-17T08:00:00.000Z",
+      disconnectedCustomerIds: [],
+      links: [
+        { connectionId: "conn-f1", lengthM: 1200, lossDb: 0.92, receivedPowerDbm: 2.08, status: "pass" },
+        { connectionId: "conn-d1", lengthM: 500, lossDb: 0.68, receivedPowerDbm: 1.4, status: "pass" },
+        { connectionId: "conn-d2", lengthM: 800, lossDb: 0.78, receivedPowerDbm: 1.3, status: "pass" },
+        { connectionId: "conn-dr1", lengthM: 100, lossDb: 0.54, receivedPowerDbm: -9.64, status: "pass" },
+        { connectionId: "conn-dr2", lengthM: 150, lossDb: 0.56, receivedPowerDbm: -9.66, status: "pass" },
+        { connectionId: "conn-dr3", lengthM: 200, lossDb: 0.58, receivedPowerDbm: -13.08, status: "pass" },
+      ],
+      intermediateNodes: [
+        { nodeId: "odc-1", nodeName: "ODC Main", nodeType: "odc", status: "estimated", lengthM: 1200, accumulatedLossDb: 0.92, estimatedPowerDbm: 2.08, transmitterPowerDbm: 3 },
+        { nodeId: "odp-1", nodeName: "ODP North", nodeType: "odp", status: "estimated", lengthM: 1700, accumulatedLossDb: 12.1, estimatedPowerDbm: -9.1, transmitterPowerDbm: 3 },
+        { nodeId: "odp-2", nodeName: "ODP South", nodeType: "odp", status: "estimated", lengthM: 2000, accumulatedLossDb: 15.5, estimatedPowerDbm: -12.5, transmitterPowerDbm: 3 },
+      ],
+      paths: [
+        {
+          ontNodeId: "ont-1", customerIds: ["cust-1"], nodeIds: ["olt-1", "odc-1", "odp-1", "ont-1"], connectionIds: ["conn-f1", "conn-d1", "conn-dr1"],
+          lengthM: 1800, lossDb: 12.64, txPowerDbm: 3, receivedPowerDbm: -9.64, rxSensitivityDbm: -27, rxOverloadDbm: -8, sensitivityMarginDb: 17.36, overloadMarginDb: 1.64, marginDb: 15.36, status: "pass", statusReason: "optical_budget_within_limits",
+          categoryLossesDb: { fiber: 0.635, connector: 1.5, splice: 0.005, splitter: 10.5 },
+        },
+        {
+          ontNodeId: "ont-2", customerIds: ["cust-2"], nodeIds: ["olt-1", "odc-1", "odp-1", "ont-2"], connectionIds: ["conn-f1", "conn-d1", "conn-dr2"],
+          lengthM: 1850, lossDb: 12.66, txPowerDbm: 3, receivedPowerDbm: -9.66, rxSensitivityDbm: -27, rxOverloadDbm: -8, sensitivityMarginDb: 17.34, overloadMarginDb: 1.66, marginDb: 15.34, status: "pass", statusReason: "optical_budget_within_limits",
+          categoryLossesDb: { fiber: 0.655, connector: 1.5, splice: 0.005, splitter: 10.5 },
+        },
+        {
+          ontNodeId: "ont-3", customerIds: ["cust-3"], nodeIds: ["olt-1", "odc-1", "odp-2", "ont-3"], connectionIds: ["conn-f1", "conn-d2", "conn-dr3"],
+          lengthM: 2200, lossDb: 16.08, txPowerDbm: 3, receivedPowerDbm: -13.08, rxSensitivityDbm: -27, rxOverloadDbm: -8, sensitivityMarginDb: 13.92, overloadMarginDb: 5.08, marginDb: 11.92, status: "pass", statusReason: "optical_budget_within_limits",
+          categoryLossesDb: { fiber: 0.78, connector: 1.5, splice: 0, splitter: 13.8 },
+        },
+      ],
+    };
+
+    const view = render(<OpticalEngineeringReport project={project} result={multiResult} loading={false} error={null} onBack={() => undefined} />);
+
+    // Verify all 8 section headers exist
+    expect(view.querySelector("#section-1-executive-summary")?.textContent).toContain("Executive Summary");
+    expect(view.querySelector("#section-2-network-infrastructure")?.textContent).toContain("Network Infrastructure Summary");
+    expect(view.querySelector("#section-3-optical-power")?.textContent).toContain("Optical Power Summary");
+    expect(view.querySelector("#section-4-detailed-link-budget")?.textContent).toContain("Detailed Optical Link Budget");
+    expect(view.querySelector("#section-5-cable-infrastructure")?.textContent).toContain("Cable Infrastructure Analysis");
+    expect(view.querySelector("#section-6-port-splitter")?.textContent).toContain("Port and Splitter Configuration");
+    expect(view.querySelector("#section-7-engineering-conclusion")?.textContent).toContain("Engineering Conclusion");
+    expect(view.querySelector("#section-8-recommendations")?.textContent).toContain("Engineering Recommendations");
+
+    // Verify all 3 ONTs appear in the Optical Power Summary ONT table
+    const sec3Text = view.querySelector("#section-3-optical-power")?.textContent ?? "";
+    expect(sec3Text).toContain("ONT Alpha");
+    expect(sec3Text).toContain("ONT Beta");
+    expect(sec3Text).toContain("ONT Gamma");
+    expect(sec3Text).toContain("ODP North");
+    expect(sec3Text).toContain("ODP South");
+
+    // Verify Section 7 Conclusion highlights highest/lowest Rx ONTs and PASS assessment
+    const sec7Text = view.querySelector("#section-7-engineering-conclusion")?.textContent ?? "";
+    expect(sec7Text).toContain("3 PASS · 0 FAIL · 0 UNKNOWN");
+    expect(sec7Text).toContain("ONT Alpha (-9.64 dBm)");
+    expect(sec7Text).toContain("ONT Gamma (-13.08 dBm)");
+    expect(sec7Text).toContain("Feeder Core 01 (1,200 m · Feeder)");
+    expect(sec7Text).toContain("PASS");
+  });
+
+  it("withholds PASS (reports INCOMPLETE) and generates evidence-based recommendations when data is missing or unconfigured", () => {
+    const project = projectFixture();
+    // Add an unconnected ONT and a cable with null length
+    const point = project.nodes[0].location;
+    project.nodes.push({ id: "ont-unconnected", type: "ont", name: "ONT Unconnected", location: point, properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt });
+    project.cableSegments.push({ id: "cable-missing-len", name: "Drop Missing Length", cableType: "drop", fiberCount: 2, geometry: { type: "LineString", coordinates: [] }, lengthM: null, properties: {}, createdAt: project.createdAt, updatedAt: project.updatedAt });
+
+    const view = render(<OpticalEngineeringReport project={project} result={opticalResult} loading={false} error={null} onBack={() => undefined} />);
+    const sec1Text = view.querySelector("#section-1-executive-summary")?.textContent ?? "";
+    const sec7Text = view.querySelector("#section-7-engineering-conclusion")?.textContent ?? "";
+    const sec8Text = view.querySelector("#section-8-recommendations")?.textContent ?? "";
+
+    expect(sec1Text).toContain("INCOMPLETE");
+    expect(sec7Text).toContain("INCOMPLETE");
+    expect(sec7Text).toContain("Drop Missing Length");
+    expect(sec8Text).toContain("Drop Missing Length");
+    expect(sec8Text).toContain("ONT Unconnected");
+  });
+
+  it("renders Cover Page metadata, Optical Power Budget formulas, suppresses raw route_field_verification_required warning logs, and strips UUID clutter", () => {
+    const project = projectFixture();
+    const pathWithRawWarning: OpticalBudgetResult["paths"][number] = {
+      ...opticalResult.paths[0],
+      diagnostics: [
+        {
+          code: "ROUTE_FIELD_VERIFICATION_REQUIRED",
+          severity: "warning",
+          category: "physical_deployment",
+          message: "Cable 'Feeder 01 [5e69eae6]' (2e3281c9-3662-4959-817f-2272e2dc2e6f) has unverified geometry.",
+          affectedEntityType: "cable",
+          affectedEntityId: "2e3281c9-3662-4959-817f-2272e2dc2e6f",
+          affectedEntityName: "Feeder 01 [5e69eae6]",
+        },
+      ],
+    };
+
+    const view = render(
+      <OpticalEngineeringReport
+        project={project}
+        result={{ ...opticalResult, paths: [pathWithRawWarning] }}
+        loading={false}
+        error={null}
+        onBack={() => undefined}
+      />,
+    );
+
+    const coverText = view.querySelector("#section-1-cover-page")?.textContent ?? "";
+    expect(coverText).toContain("FTTH Network Engineering Report");
+    expect(coverText).toContain("FIBERPLAN");
+    expect(coverText).toContain("GPON / FTTH");
+
+    const formulaText = view.querySelector("#section-3-optical-power")?.textContent ?? "";
+    expect(formulaText).toContain("L_fiber = Σ (L_i × α_i)");
+    expect(formulaText).toContain("P_rx = P_tx − L_total");
+    expect(formulaText).toContain("M_sensitivity = P_rx − P_min");
+    expect(formulaText).toContain("M_overload = P_max − P_rx");
+
+    // Raw ROUTE_FIELD_VERIFICATION_REQUIRED warning logs and UUIDs must not appear in visible report text
+    const fullText = view.textContent ?? "";
+    expect(fullText).not.toContain("ROUTE_FIELD_VERIFICATION_REQUIRED");
+    expect(fullText).not.toContain("2e3281c9-3662-4959-817f-2272e2dc2e6f");
+  });
+
+  it("renders 16-section RAB report with customer metrics, splitter reconciliation, and document control", () => {
+    const detailedRabResult: ConstructionCostResult = {
+      projectId: "test-proj-calc-physical-20261031",
+      calculatedAt: "2026-11-07T00:00:00.000Z",
+      currency: "IDR",
+      totalAmount: 250810250,
+      totalCapex: 250810250,
+      materialSubtotal: 132856100,
+      installationSubtotal: 117954150,
+      grandTotal: 250810250,
+      plannedCustomerCount: 110,
+      assignedOntCount: 110,
+      connectedCustomerCount: 0,
+      costPerPlannedCustomer: 2280093.18,
+      costPerConnectedCustomer: null,
+      complete: true,
+      items: [
+        { code: "CABLE-FEEDER-MAT", description: "Feeder cable 24-core", quantity: 1232.09, unit: "m", unitCost: 12500, amount: 15401125, category: "material", rateStatus: "Verified Quotation" },
+        { code: "CABLE-FEEDER-INST", description: "Feeder cable aerial installation", quantity: 1232.09, unit: "m", unitCost: 8500, amount: 10472765, category: "installation", rateStatus: "Historical Rate" },
+      ],
+      summary: {
+        activeSplitterCount: 16,
+        feederSplitterCount: 2,
+        distributionSplitterCount: 14,
+        splitterCount: 16,
+        cableQuantityAudit: [
+          { category: "feeder", cableSegmentIds: ["feeder-1"], physicalLengthM: 1120.08, slackPercent: 10, billedLengthM: 1232.09 }
+        ],
+        poleStatusCounts: { proposed: 4, existing: 1, shared: 3, unverified: 1 }
+      }
+    };
+
+    const view = render(
+      <RabReport
+        projectName="kenjo punya"
+        result={detailedRabResult}
+        loading={false}
+        error={null}
+        onBack={() => undefined}
+      />
+    );
+
+    const text = view.textContent ?? "";
+    expect(text).toContain("RAB-FTTH-2026-001");
+    expect(text).toContain("Revised Preliminary Cost Estimate (Rev 1.1)");
+    expect(text).toContain("Planned Customers (Pelanggan Direncanakan)");
+    expect(text).toContain("Assigned ONTs (ONT Ditugaskan)");
+    expect(text).toContain("Connected Customers (Pelanggan Aktif Terhubung)");
+    expect(text).toContain("Pelanggan dengan status aktif operasional (0 pada fase pra-konstruksi/perencanaan)");
+    expect(text).toContain("Estimated CAPEX per Planned Customer");
+    expect(text).toContain("2,280,093.18");
+    expect(text).toContain("N/A · Proyek berada pada tahap pra-konstruksi");
+    expect(text).toContain("Rekonsiliasi Pengadaan Terverifikasi");
+    expect(text).toContain("16");
+    expect(text).toContain("Proposed (Tiang Baru)");
+    expect(text).toContain("Existing (Tiang Eksisting)");
+    expect(text).toContain("Shared (Tiang Bersama / PLN)");
+    expect(text).toContain("Unverified (Belum Terverifikasi)");
+  });
 });

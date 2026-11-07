@@ -29,6 +29,17 @@ function formatSourceKind(source: string): string {
   return source.replace(/_/g, " ");
 }
 
+function sanitizeComponentLabel(label: string): string {
+  // Strip raw 36-char UUIDs in parentheses while preserving disambiguating [8-hex] short codes when present
+  return label
+    .replace(/\s*\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)/gi, "")
+    .trim();
+}
+
+function isUuidPrefixKey(key: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(key);
+}
+
 export function OpticalCalculationTable({ rows, categoryLossesDb, physicalLossDb, designMarginDb, totalDesignAllowanceDb, powerLabel, powerDbm, profileId, parameterSources, compact }: Props) {
   const equation = (row: OpticalLossBreakdownItem) => {
     const quantity = row.calculationQuantity ?? row.quantity;
@@ -36,19 +47,25 @@ export function OpticalCalculationTable({ rows, categoryLossesDb, physicalLossDb
     if (row.totalLossDb == null || row.unitLossDb == null || quantity == null) return "Calculation incomplete";
     if (row.category === "fiber") {
       const km = quantity / 1000;
-      return `${formatReportNumber(km, 5)} km × ${formatReportNumber(row.unitLossDb)} dB/km = ${formatReportNumber(row.totalLossDb)} dB`;
+      const exactProduct = km * row.unitLossDb;
+      const exactStr = formatReportNumber(exactProduct, 4);
+      const roundedStr = formatReportNumber(row.totalLossDb, 2);
+      if (exactStr !== roundedStr && Math.abs(exactProduct - row.totalLossDb) >= 0.0001) {
+        return `${formatReportNumber(km, 5)} km × ${formatReportNumber(row.unitLossDb)} dB/km = ${roundedStr} dB (exact ${exactStr} dB)`;
+      }
+      return `${formatReportNumber(km, 5)} km × ${formatReportNumber(row.unitLossDb)} dB/km = ${roundedStr} dB`;
     }
     return `${formatReportNumber(quantity)} ${unit ?? "unit"} × ${formatReportNumber(row.unitLossDb)} ${row.unitLossUnit ?? "dB/unit"} = ${formatReportNumber(row.totalLossDb)} dB`;
   };
 
   const categoryEntries = Object.entries(categoryLossesDb ?? {});
-  const provenanceEntries = Object.entries(parameterSources ?? {});
+  const provenanceEntries = Object.entries(parameterSources ?? {}).filter(([key]) => !isUuidPrefixKey(key));
 
   const tableContent = (
     <div className="report-table-wrap"><table className="report-table optical-calculation-table">
       <thead><tr><th>Component / path position</th><th>Quantity / length</th><th>Unit attenuation</th><th>Mathematical substitution</th><th>Component loss</th><th>Cumulative physical loss</th><th>Source</th></tr></thead>
       <tbody>{rows.length ? rows.map((row) => <tr key={`${row.componentId}-${row.pathPosition}`}>
-        <td>{row.component}<small>{row.position}</small></td>
+        <td>{sanitizeComponentLabel(row.component)}<small>{row.position}</small></td>
         <td className="numeric">{row.quantity == null ? "Unknown" : `${formatReportNumber(row.quantity)} ${row.quantityUnit ?? ""}`}{row.calculationQuantity != null && row.calculationQuantity !== row.quantity && <small>Loss uses {formatReportNumber(row.calculationQuantity)} {row.calculationQuantityUnit}</small>}</td>
         <td className="numeric">{value(row.unitLossDb, row.unitLossUnit ?? "dB")}</td>
         <td>{equation(row)}</td><td className="numeric">{value(row.totalLossDb, "dB")}</td><td className="numeric">{value(row.cumulativeLossDb, "dB")}</td>

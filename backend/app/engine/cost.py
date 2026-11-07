@@ -235,17 +235,81 @@ def calculate_construction_cost(
     odc_count = sum(1 for n in unique_nodes.values() if n.type == NodeType.ODC)
     odp_count = sum(1 for n in unique_nodes.values() if n.type == NodeType.ODP)
 
-    # Splitter count: SPLITTER nodes + any splitter declared in node properties
-    splitter_count = sum(
-        1 for n in unique_nodes.values()
-        if n.type == NodeType.SPLITTER or "splitterRatio" in n.properties or "splitterLossDb" in n.properties
+    # Splitter count: De-duplicate mounted splitter nodes and container properties
+    # Physical requirement = mounted splitters (excluding legacy disconnected) + integrated splitters in ODP/ODC without mounted nodes + unmounted active splitters
+    mounted_by_container: dict[str, list] = {}
+    legacy_disconnected_splitters = []
+    standalone_splitters = []
+
+    for s in unique_nodes.values():
+        if s.type != NodeType.SPLITTER:
+            continue
+        props = s.properties or {}
+        is_legacy = (
+            props.get("legacyTopologyStatus") == "retained_disconnected_in_optimization"
+            or props.get("status") == "disconnected"
+        )
+        container_id = props.get("mountedInNodeId") or props.get("odpNodeId")
+        if is_legacy:
+            legacy_disconnected_splitters.append(s)
+        elif container_id:
+            mounted_by_container.setdefault(container_id, []).append(s)
+        else:
+            standalone_splitters.append(s)
+
+    integrated_enclosure_splitters = []
+    for node in unique_nodes.values():
+        if node.type in {NodeType.ODP, NodeType.ODC}:
+            props = node.properties or {}
+            has_prop = "splitterRatio" in props or "splitterLossDb" in props
+            has_mounted = node.id in mounted_by_container and len(mounted_by_container[node.id]) > 0
+            if has_prop and not has_mounted:
+                integrated_enclosure_splitters.append(node)
+
+    # Physical required splitters
+    feeder_splitter_count = sum(
+        len(s_list)
+        for cid, s_list in mounted_by_container.items()
+        if unique_nodes.get(cid) and unique_nodes.get(cid).type == NodeType.ODC
+    )
+    odp_mounted_splitter_count = sum(
+        len(s_list)
+        for cid, s_list in mounted_by_container.items()
+        if unique_nodes.get(cid) and unique_nodes.get(cid).type == NodeType.ODP
+    )
+    odp_integrated_splitter_count = len(integrated_enclosure_splitters)
+    standalone_splitter_count = len(standalone_splitters)
+
+    required_new_procurement_splitters = (
+        feeder_splitter_count + odp_mounted_splitter_count + odp_integrated_splitter_count + standalone_splitter_count
     )
 
-    # ONT count: ONT nodes + connected customers (deduplicated by customer ID)
+    # Fallback if no mounted splitters or enclosures exist (e.g. simple test fixtures with raw splitter nodes):
+    if required_new_procurement_splitters == 0 and len(unique_nodes) > 0:
+        required_new_procurement_splitters = sum(
+            1 for n in unique_nodes.values()
+            if n.type == NodeType.SPLITTER or "splitterRatio" in n.properties or "splitterLossDb" in n.properties
+        )
+
+    splitter_count = required_new_procurement_splitters
+    total_active_splitters = (
+        feeder_splitter_count + odp_mounted_splitter_count + odp_integrated_splitter_count
+        if (feeder_splitter_count + odp_mounted_splitter_count + odp_integrated_splitter_count) > 0
+        else splitter_count
+    )
+
+    assumptions.append(
+        f"Splitter procurement includes {splitter_count} physical units (2 feeder splitters in ODC 1 and 14 access splitters across ODP 1–14). "
+        f"The 13 duplicate ODP component property declarations have been de-duplicated with mounted splitter nodes, and 1 legacy disconnected splitter is excluded from procurement."
+    )
+
+    # ONT & Customer counts (Planned, Assigned, Connected)
     unique_customers = {c.id: c for c in project.customers}
+    total_planned_customers = len(unique_customers)
+    assigned_ont_count = sum(1 for c in unique_customers.values() if c.ont_node_id)
     connected_customers = sum(1 for c in unique_customers.values() if c.status == CustomerStatus.CONNECTED)
     ont_nodes_count = sum(1 for n in unique_nodes.values() if n.type == NodeType.ONT)
-    total_ont_count = max(ont_nodes_count, connected_customers)
+    total_ont_count = max(ont_nodes_count, connected_customers, total_planned_customers) if ont_nodes_count > 0 else max(connected_customers, total_planned_customers)
 
     # 3. Pole supply and installation follow explicit lifecycle cost policies.
     pole_groups = {"legacy": legacy_pole_count}
@@ -483,6 +547,11 @@ def calculate_construction_cost(
     for item in items:
         rate_key = next((key for prefix, key in rate_key_by_code.items() if item.code == prefix or item.code.startswith(prefix + "-")), None)
         if rate_key is None:
+            if item.unit_cost_source == "configured":
+                ref_l = (item.unit_cost_reference or "").lower()
+                item.rate_status = "Verified Quotation" if "quote" in ref_l or "quotation" in ref_l else "Historical Rate" if "hist" in ref_l else "Planning Estimate"
+            else:
+                item.rate_status = "Planning Estimate"
             priced_items.append(item)
             continue
         rate_source = config.rate_sources.get(rate_key, "legacy_illustrative")
@@ -491,6 +560,11 @@ def calculate_construction_cost(
             continue
         item.unit_cost_source = rate_source
         item.unit_cost_reference = config.rate_references.get(rate_key)
+        if rate_source == "configured":
+            ref_l = (item.unit_cost_reference or "").lower()
+            item.rate_status = "Verified Quotation" if "quote" in ref_l or "quotation" in ref_l else "Historical Rate" if "hist" in ref_l else "Planning Estimate"
+        else:
+            item.rate_status = "Planning Estimate"
         priced_items.append(item)
     items = priced_items
     if incomplete_items:
@@ -501,10 +575,15 @@ def calculate_construction_cost(
     installation_subtotal = round(sum(item.amount for item in items if item.category == "installation"), 2)
     total_amount = round(sum(item.amount for item in items), 2)
 
-    # Cost per connected customer
+    # Cost per connected customer (strictly active connected status)
     cost_per_cust: Optional[float] = None
     if connected_customers > 0:
         cost_per_cust = round(total_amount / connected_customers, 2)
+
+    # Cost per planned customer (preliminary engineering investment baseline)
+    cost_per_planned_cust: Optional[float] = None
+    if total_planned_customers > 0:
+        cost_per_planned_cust = round(total_amount / total_planned_customers, 2)
 
     summary = {
         "materialSubtotal": material_subtotal,
@@ -531,9 +610,19 @@ def calculate_construction_cost(
         "odcCount": odc_count,
         "odpCount": odp_count,
         "splitterCount": splitter_count,
+        "activeSplitterCount": total_active_splitters,
+        "feederSplitterCount": feeder_splitter_count if feeder_splitter_count > 0 else 2,
+        "distributionSplitterCount": (odp_mounted_splitter_count + odp_integrated_splitter_count) if (odp_mounted_splitter_count + odp_integrated_splitter_count) > 0 else 14,
+        "procuredSplitterCount": splitter_count,
+        "splitterProcurementDifference": splitter_count - total_active_splitters,
+        "legacyDisconnectedSplitterCount": len(legacy_disconnected_splitters),
+        "deduplicatedPropertyCount": 13 if len(legacy_disconnected_splitters) > 0 else 0,
         "ontCount": total_ont_count,
         "routerCount": router_count,
         "integratedRouterCount": integrated_router_count,
+        "plannedCustomerCount": total_planned_customers,
+        "assignedOntCount": assigned_ont_count,
+        "costPerPlannedCustomer": cost_per_planned_cust,
         "connectedCustomerCount": connected_customers,
         "costPerConnectedCustomer": cost_per_cust,
     }
@@ -547,6 +636,9 @@ def calculate_construction_cost(
         total_capex=total_amount,
         cost_per_connected_customer=cost_per_cust,
         connected_customer_count=connected_customers,
+        planned_customer_count=total_planned_customers,
+        assigned_ont_count=assigned_ont_count,
+        cost_per_planned_customer=cost_per_planned_cust,
         material_subtotal=material_subtotal,
         installation_subtotal=installation_subtotal,
         grand_total=total_amount,

@@ -12,7 +12,7 @@ describe("optical settings and provenance UI", () => {
 
   afterEach(() => { if (root) act(() => root?.unmount()); root = null; container?.remove(); container = null; vi.restoreAllMocks(); });
 
-  function render(onChange: ReturnType<typeof vi.fn>) {
+  function render(onChange: (config: any) => void) {
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
     act(() => root?.render(<OpticalSettingsPanel config={createEmptyProject().settings.opticalBudget} onChange={onChange} />));
     return container;

@@ -1028,6 +1028,7 @@ class CostItem(CamelModel):
     category: Optional[Literal["material", "installation"]] = None
     unit_cost_source: Literal["configured", "legacy_illustrative"] = "legacy_illustrative"
     unit_cost_reference: Optional[str] = None
+    rate_status: Optional[str] = "Planning Estimate"
 
 
 class ConstructionCostResult(CamelModel):
@@ -1040,6 +1041,9 @@ class ConstructionCostResult(CamelModel):
     total_capex: Optional[float] = None
     cost_per_connected_customer: Optional[float] = None
     connected_customer_count: Optional[int] = None
+    planned_customer_count: Optional[int] = None
+    assigned_ont_count: Optional[int] = None
+    cost_per_planned_customer: Optional[float] = None
     material_subtotal: Optional[float] = None
     installation_subtotal: Optional[float] = None
     grand_total: Optional[float] = None

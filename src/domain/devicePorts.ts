@@ -282,21 +282,34 @@ export function getDevicePorts(
     const usedIncoming = new Set<string>();
     const usedOutgoing = new Set<string>();
 
+    const mountedHostId =
+      typeof node.properties.mountedInNodeId === "string" && node.properties.mountedInNodeId.trim() !== ""
+        ? node.properties.mountedInNodeId.trim()
+        : typeof node.properties.parentNodeId === "string" && node.properties.parentNodeId.trim() !== ""
+          ? node.properties.parentNodeId.trim()
+          : null;
+    const mountedHostNode = mountedHostId ? nodesById[mountedHostId] : undefined;
+
     for (let i = 1; i <= inputCount; i++) {
       const portId = `IN-${i.toString().padStart(2, "0")}`;
       const label = `IN ${i}`;
       const conn = incoming.find((c) => !usedIncoming.has(c.id));
       if (conn) usedIncoming.add(conn.id);
+      const isMountedInput = !conn && i === 1 && mountedHostId !== null;
       ports.push({
         id: portId,
         label,
         portType: "input",
         nodeId: node.id,
         capacity: 1,
-        status: conn ? "connected" : "available",
-        connectedNodeId: conn?.fromNodeId ?? null,
-        connectedNodeName: conn ? (nodesById[conn.fromNodeId]?.name ?? conn.fromNodeId) : null,
-        connectedPortId: conn?.fromPortId ?? null,
+        status: conn || isMountedInput ? "connected" : "available",
+        connectedNodeId: conn?.fromNodeId ?? (isMountedInput ? mountedHostId : null),
+        connectedNodeName: conn
+          ? (nodesById[conn.fromNodeId]?.name ?? conn.fromNodeId)
+          : isMountedInput
+            ? `${mountedHostNode?.name ?? mountedHostId} (${typeof node.properties.inputPortId === "string" ? node.properties.inputPortId : "IN-1"})`
+            : null,
+        connectedPortId: conn?.fromPortId ?? (isMountedInput && typeof node.properties.inputPortId === "string" ? node.properties.inputPortId : null),
         connectionId: conn?.id ?? null,
       });
     }
@@ -307,16 +320,21 @@ export function getDevicePorts(
 
     for (let i = 1; i <= outCount; i++) {
       const portId = `OUT-${i.toString().padStart(2, "0")}`;
+      const shortPortId = `OUT-${i}`;
       const defaultLabel = `OUT ${i}`;
-      const conf = configuredMap.get(portId);
+      const conf = configuredMap.get(portId) ?? configuredMap.get(shortPortId);
       const label = conf?.label || defaultLabel;
 
-      let conn = outgoing.find((c) => (c.fromPortId === portId || c.fromPortId === label) && !usedOutgoing.has(c.id));
+      let conn = outgoing.find(
+        (c) => (c.fromPortId === portId || c.fromPortId === shortPortId || c.fromPortId === label) && !usedOutgoing.has(c.id),
+      );
       if (!conn) {
         conn = outgoing.find((c) => !c.fromPortId && !usedOutgoing.has(c.id));
       }
 
-      const assigned = assignments.find((a) => a.portId === portId || a.portId === label);
+      const assigned = assignments.find(
+        (a) => a.portId === portId || a.portId === shortPortId || a.portId === label,
+      );
       let status: "available" | "connected" | "disabled" = "available";
       let connectedNodeId: string | null = null;
       let connectedNodeName: string | null = null;

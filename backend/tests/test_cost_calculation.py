@@ -384,3 +384,113 @@ def test_unknown_pole_and_device_rates_do_not_charge_legacy_numeric_defaults():
     assert result.complete is False
     assert {item["code"] for item in result.incomplete_items} >= {"POLE-SUPPLY", "OLT-SUPPLY"}
 
+
+def test_customer_semantics_planned_assigned_connected():
+    """Verify semantic distinction: planned vs assigned vs connected customers."""
+    onts = [NetworkNode(id=f"ont-{i}", type=NodeType.ONT, name=f"ONT {i}", location=PointGeometry(coordinates=(0, 0))) for i in range(5)]
+    customers = [
+        Customer(id=f"c-{i}", name=f"Customer {i}", location=PointGeometry(coordinates=(0, 0)), status=CustomerStatus.PLANNED, ont_node_id=f"ont-{i}")
+        for i in range(5)
+    ]
+    project = Project(id="cust-semantics-test", name="Semantics Test", nodes=onts, customers=customers)
+    result = calculate_construction_cost(project)
+
+    assert result.planned_customer_count == 5
+    assert result.assigned_ont_count == 5
+    assert result.connected_customer_count == 0
+    assert result.cost_per_connected_customer is None
+    assert result.cost_per_planned_customer == round(result.total_amount / 5, 2)
+    assert result.summary["plannedCustomerCount"] == 5
+    assert result.summary["assignedOntCount"] == 5
+    assert result.summary["connectedCustomerCount"] == 0
+    assert result.summary["costPerConnectedCustomer"] is None
+    assert result.summary["costPerPlannedCustomer"] == round(result.total_amount / 5, 2)
+
+
+def test_rate_status_provenance_classification():
+    """Verify that items receive appropriate Rate Status based on source and reference."""
+    olt = NetworkNode(id="olt", type=NodeType.OLT, name="OLT", location=PointGeometry(coordinates=(0, 0)))
+    config = ConstructionCostConfig(
+        olt_unit_cost=25000000.0,
+        rate_sources={"oltUnitCost": "configured"},
+        rate_references={"oltUnitCost": "Supplier Quotation #Q-9912"},
+    )
+    project = Project(id="rate-status-test", name="Rate Status Test", nodes=[olt], settings={"constructionCost": config})
+    result = calculate_construction_cost(project)
+    olt_item = next(i for i in result.items if i.code == "OLT-SUPPLY")
+    assert olt_item.rate_status == "Verified Quotation"
+    assert olt_item.unit_cost_reference == "Supplier Quotation #Q-9912"
+
+
+def test_splitter_deduplication_and_procurement_reconciliation():
+    """Verify that mounted splitter nodes and ODP/ODC component properties are not double-counted,
+
+    and legacy disconnected splitters are excluded from required procurement.
+    """
+    odc = NetworkNode(id="odc-1", type=NodeType.ODC, name="ODC 1", location=PointGeometry(coordinates=(0, 0)))
+    feeder_s1 = NetworkNode(
+        id="s-feeder-1",
+        type=NodeType.SPLITTER,
+        name="Feeder Splitter 1",
+        location=PointGeometry(coordinates=(0, 0)),
+        properties={"mountedInNodeId": "odc-1", "installationStatus": "proposed"},
+    )
+    feeder_s2 = NetworkNode(
+        id="s-feeder-2",
+        type=NodeType.SPLITTER,
+        name="Feeder Splitter 2",
+        location=PointGeometry(coordinates=(0, 0)),
+        properties={"mountedInNodeId": "odc-1", "installationStatus": "proposed"},
+    )
+
+    odp1 = NetworkNode(
+        id="odp-1",
+        type=NodeType.ODP,
+        name="ODP 1",
+        location=PointGeometry(coordinates=(0, 0)),
+        properties={"splitterRatio": "1:8"},
+    )
+    access_s1 = NetworkNode(
+        id="s-access-1",
+        type=NodeType.SPLITTER,
+        name="ODP 1 Splitter",
+        location=PointGeometry(coordinates=(0, 0)),
+        properties={"mountedInNodeId": "odp-1", "installationStatus": "proposed"},
+    )
+
+    odp2 = NetworkNode(
+        id="odp-2",
+        type=NodeType.ODP,
+        name="ODP 2",
+        location=PointGeometry(coordinates=(0, 0)),
+        properties={"splitterRatio": "1:8"},
+    )
+
+    legacy_s = NetworkNode(
+        id="s-legacy",
+        type=NodeType.SPLITTER,
+        name="Legacy Splitter",
+        location=PointGeometry(coordinates=(0, 0)),
+        properties={"legacyTopologyStatus": "retained_disconnected_in_optimization"},
+    )
+
+    project = Project(
+        id="splitter-dedup-test",
+        name="Splitter Dedup Test",
+        nodes=[odc, feeder_s1, feeder_s2, odp1, access_s1, odp2, legacy_s],
+    )
+
+    result = calculate_construction_cost(project)
+
+    # Required procurement must be exactly 4 (2 feeder in ODC + 1 mounted in ODP 1 + 1 integrated in ODP 2)
+    # It must NOT be 6 (which would double count ODP 1 and include legacy_s)
+    assert result.summary["splitterCount"] == 4
+    assert result.summary["activeSplitterCount"] == 4
+    assert result.summary["procuredSplitterCount"] == 4
+    assert result.summary["splitterProcurementDifference"] == 0
+    assert result.summary["legacyDisconnectedSplitterCount"] == 1
+    spl_supply = next((i for i in result.items if i.code == "SPL-SUPPLY"), None)
+    assert spl_supply is not None
+    assert spl_supply.quantity == 4.0
+
+

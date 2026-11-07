@@ -1,18 +1,34 @@
+
 """Database configuration using SQLite and SQLAlchemy."""
 
 import os
+from pathlib import Path
 from typing import AsyncGenerator
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-DEFAULT_DB_URL = os.environ.get("FTTH_DATABASE_URL", "sqlite:///./ftth_simulator.db")
+# Load environment variables from backend/.env
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+DEFAULT_DB_URL = os.environ.get(
+    "FTTH_DATABASE_URL",
+    "sqlite:///./ftth_simulator.db"
+)
 
 engine = create_engine(
     DEFAULT_DB_URL,
-    connect_args={"check_same_thread": False} if DEFAULT_DB_URL.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False}
+    if DEFAULT_DB_URL.startswith("sqlite")
+    else {},
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 
 Base = declarative_base()
 
@@ -30,9 +46,23 @@ def init_db(target_engine=None) -> None:
     """Create tables and apply additive SQLite columns for older project stores."""
     eng = target_engine or engine
     Base.metadata.create_all(bind=eng)
+
     if eng.dialect.name == "sqlite":
-        columns = {column["name"] for column in inspect(eng).get_columns("projects")}
+        columns = {
+            column["name"]
+            for column in inspect(eng).get_columns("projects")
+        }
+
         with eng.begin() as connection:
-            for name in ("pole_spans_data", "optical_components_data", "areas_data"):
+            for name in (
+                "pole_spans_data",
+                "optical_components_data",
+                "areas_data"
+            ):
                 if name not in columns:
-                    connection.execute(text(f"ALTER TABLE projects ADD COLUMN {name} JSON NOT NULL DEFAULT '[]'"))
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE projects "
+                            f"ADD COLUMN {name} JSON NOT NULL DEFAULT '[]'"
+                        )
+                    )

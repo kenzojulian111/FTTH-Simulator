@@ -252,8 +252,9 @@ export interface OpticalLossBreakdownItem {
 }
 export interface ConstructionCostResult {
   projectId: string; calculatedAt: string; currency: string; totalAmount: number;
-  items: Array<{ code: string; description: string; quantity: number; unit: string; unitCost: number; amount: number; category?: "material" | "installation" | null; unitCostSource?: "configured" | "legacy_illustrative"; unitCostReference?: string | null }>;
+  items: Array<{ code: string; description: string; quantity: number; unit: string; unitCost: number; amount: number; category?: "material" | "installation" | null; unitCostSource?: "configured" | "legacy_illustrative"; unitCostReference?: string | null; rateStatus?: string | null }>;
   totalCapex?: number | null; costPerConnectedCustomer?: number | null; connectedCustomerCount?: number | null;
+  plannedCustomerCount?: number | null; assignedOntCount?: number | null; costPerPlannedCustomer?: number | null;
   materialSubtotal?: number | null; installationSubtotal?: number | null; grandTotal?: number | null;
   summary?: Record<string, unknown> | null;
   incompleteItems?: Array<Record<string, unknown>>; assumptions?: string[]; complete?: boolean;

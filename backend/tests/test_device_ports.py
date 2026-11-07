@@ -233,7 +233,7 @@ def test_optical_budget_no_double_counting(clean_ftth_project):
 def test_migrated_database_project_integrity():
     """Verify test-proj-calc-physical-20261031 in database meets all Section 8 and 9 requirements."""
     engine = create_engine("sqlite:///ftth_simulator.db")
-    Session = sessionmaker(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False)
     db = Session()
     repo = ProjectRepository(db)
 
@@ -289,7 +289,7 @@ def test_migrated_database_project_integrity():
 
 def test_custom_optical_parameters_recalculation():
     engine = create_engine("sqlite:///ftth_simulator.db")
-    Session = sessionmaker(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False)
     db = Session()
     repo = ProjectRepository(db)
 
