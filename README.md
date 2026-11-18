@@ -2,6 +2,7 @@
 
 > An interactive FTTH network planning and optical link budget simulation platform.
 
+[![Rust](https://img.shields.io/badge/Rust-Axum%20%7C%20SQLx-orange.svg)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18.3.1-61dafb.svg)](https://react.dev/)
@@ -139,14 +140,13 @@ flowchart TD
 | **Language (Frontend)** | TypeScript | `~5.6.2` | Static type safety and strict schema alignment |
 | **Build Tooling** | Vite | `^8.3.6` | Fast development server and production bundler |
 | **Mapping & GIS** | Leaflet & React-Leaflet | `1.9.4` / `4.2.1` | Interactive vector map and layer rendering |
-| **Backend Framework** | FastAPI | `>=0.115.0` | High-performance Python async REST API |
-| **ASGI Web Server** | Uvicorn | `>=0.30.0` | ASGI production server |
-| **Data Validation** | Pydantic (v2) | `>=2.8.0` | Strict request/response schema modeling |
-| **Database ORM** | SQLAlchemy | `>=2.0.0` | Database abstraction and aggregate persistence |
+| **Backend (Rust)** | Axum + Tokio + SQLx | `0.8` / `0.8` | High-performance native async REST API |
+| **Backend (Python)** | FastAPI + Uvicorn | `>=0.115.0` | Alternative Python async REST API |
+| **Data Validation** | Pydantic (v2) / Serde | `>=2.8.0` / `1.0` | Strict request/response schema modeling |
 | **Database** | SQLite 3 | Embedded | Single-file persistent document-aggregate store |
-| **Testing (Backend)** | Pytest & AnyIO | `>=8.0.0` | Automated backend engine and API route testing |
+| **Testing (Backend)** | Cargo test / Pytest | Native / `>=8.0` | Automated backend engine and API route testing |
 | **Testing (Frontend)** | Vitest & JSDOM | `^5.1.0` / `^25.0.1` | Unit and component integration testing |
-| **Containerization** | Docker | Multi-stage | Alpine Node.js builder + Debian Python runtime |
+| **Containerization** | Docker | Multi-stage | Alpine Node.js builder + runtime |
 
 ---
 
@@ -154,16 +154,12 @@ flowchart TD
 
 ```text
 .
-├── backend/
-│   ├── app/
-│   │   ├── api/            # FastAPI routes, schemas, and error handlers
-│   │   ├── domain/         # Pydantic domain models and topology validation
-│   │   ├── engine/         # Optical budget, BoQ cost, and pole span engines
-│   │   ├── persistence/    # SQLAlchemy ORM models, database session, repository
-│   │   ├── services/       # Geocoding service with rate limiting and caching
-│   │   ├── config.py       # CORS, environment, and runtime settings
-│   │   └── main.py         # FastAPI application entry point and static SPA server
-│   ├── tests/              # Pytest test suite (216 tests)
+├── backend-rust/           # High-performance native Rust backend (Axum, Tokio, SQLx SQLite)
+│   ├── src/                # Cost, optical budget, pole span, and validation engines
+│   └── Cargo.toml          # Rust dependencies & binary configuration
+├── backend/                # Python FastAPI reference implementation
+│   ├── app/                # FastAPI routes, schemas, and engines
+│   ├── tests/              # Pytest test suite
 │   └── requirements.txt    # Python dependencies
 ├── docs/                   # Engineering specifications, API contract, and operational notes
 │   ├── API_CONTRACT.md     # Detailed REST API v1 specification and schema examples
@@ -191,13 +187,14 @@ flowchart TD
 
 ### Prerequisites
 * **Node.js:** `v18.0.0` or higher (`v20+` or `v22+` recommended)
-* **Python:** `3.12` or `3.14`
+* **Rust:** `1.80.0` or higher (for the high-performance native Rust backend)
+* **Python:** `3.12` or `3.14` (optional, for the FastAPI backend)
 * **Git:** Latest version
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-username>/ftth-network-planning-simulator.git
-cd ftth-network-planning-simulator
+git clone https://github.com/kenzojulian111/FTTH-Simulator.git
+cd FTTH-Simulator
 ```
 
 ### 2. Frontend Dependencies Setup
@@ -207,6 +204,12 @@ npm install
 ```
 
 ### 3. Backend Environment Setup
+
+#### Option 1: Rust Backend (Recommended - Fast & Low Memory)
+Ensure you have Rust and Cargo installed (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
+No extra pip dependencies needed!
+
+#### Option 2: Python Backend (Alternative)
 Create and activate a Python virtual environment:
 
 **Linux / macOS:**
@@ -243,11 +246,31 @@ VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 
 ## Running the Application
 
-### Option A: Local Development (Recommended)
+### Option A: Local Development with Rust Backend (Recommended)
 
-Run backend and frontend concurrently in two separate terminals.
+Run the Rust backend and React frontend concurrently in two separate terminals.
 
-**Terminal 1 — Backend API:**
+**Terminal 1 — Rust Backend API (Port 8000):**
+```bash
+npm run backend:rust
+# Atau untuk mode release yang dioptimasi:
+# npm run backend:rust:release
+```
+* Backend API root: `http://127.0.0.1:8000`
+* Health check: `http://127.0.0.1:8000/health`
+
+**Terminal 2 — Frontend Dev Server (Port 5173):**
+```bash
+npm run dev
+```
+* Vite will output the local development address, typically: `http://localhost:5173`
+* Vite automatically proxies requests from `/api/v1` to `http://127.0.0.1:8000`.
+
+---
+
+### Option B: Local Development with Python FastAPI
+
+**Terminal 1 — Python Backend API:**
 ```bash
 source .venv/bin/activate
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
@@ -260,8 +283,6 @@ python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```bash
 npm run dev
 ```
-* Vite will output the local development address, typically: `http://localhost:5173`
-* Vite automatically proxies requests from `/api/v1` to `http://127.0.0.1:8000`.
 
 ---
 
