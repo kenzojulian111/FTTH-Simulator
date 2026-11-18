@@ -3,6 +3,7 @@
 > An interactive FTTH network planning and optical link budget simulation platform.
 
 [![Rust](https://img.shields.io/badge/Rust-Axum%20%7C%20SQLx-orange.svg)](https://www.rust-lang.org/)
+[![Database](https://img.shields.io/badge/Database-Redb%20%7C%20SQLite-brightgreen.svg)](https://github.com/cberner/redb)
 [![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18.3.1-61dafb.svg)](https://react.dev/)
@@ -85,19 +86,21 @@ flowchart TD
         API_Client["API Service Layer (Fetch / Proxy)"]
     end
 
-    subgraph Server ["Backend (FastAPI Engine)"]
-        Router["FastAPI REST Router (/api/v1)"]
-        Val["Topology Validation & Cycle Detection (validation.py)"]
-        Opt["Optical Link Budget Engine (optical.py)"]
-        Cost["CAPEX & BoQ Engine (cost.py)"]
-        Pole["Pole Span Planning Engine (pole.py)"]
-        Geo["Geodesic & LineString Engine (geo.py)"]
-        GeoService["Nominatim Geocoding Adapter (geocoding.py)"]
+    subgraph Server ["Backend (Rust Engine / Python API)"]
+        Router["Axum / FastAPI REST Router (/api/v1)"]
+        Val["Topology Validation & Cycle Detection"]
+        Opt["Optical Link Budget Engine"]
+        Cost["CAPEX & BoQ Engine"]
+        Pole["Pole Span Planning Engine"]
+        Geo["Geodesic & LineString Engine"]
+        GeoService["Nominatim Geocoding Adapter"]
     end
 
     subgraph Storage ["Persistence Layer"]
+        RedbStore["Redb Storage Engine (Zero-C Native Rust)"]
+        DB_Redb[("Pure-Rust Database (ftth_simulator.redb)")]
         Repo["SQLAlchemy Repository"]
-        DB[("SQLite Database (ftth_simulator.db)")]
+        DB_SQLite[("SQLite Database (ftth_simulator.db)")]
     end
 
     subgraph External ["External Services"]
@@ -121,14 +124,17 @@ flowchart TD
     Pole --> Geo
     Cost --> Geo
 
+    Router --> RedbStore
+    RedbStore --> DB_Redb
     Router --> Repo
-    Repo --> DB
+    Repo --> DB_SQLite
 ```
 
 ### Architectural Highlights
 * **Domain Model Aggregation:** The `Project` model acts as the root aggregate. Nodes, connections, cable segments, customer records, and engineering settings are persisted atomically to prevent orphaned records.
-* **Decoupled Engines:** The calculation modules (`optical.py`, `cost.py`, `pole.py`) are pure domain services that operate on standard Pydantic models. They can be invoked independently via unit tests or script pipelines without running a web server.
-* **In-Memory & API Modes:** The frontend includes an in-memory client adapter for standalone browser testing and seamlessly switches to the FastAPI backend when `VITE_API_BASE_URL` is configured.
+* **Pure-Rust Embedded Database (Redb):** The Rust backend uses `redb`, a 100% memory-safe, zero-C-dependency ACID B-tree embedded database stored in `ftth_simulator.redb` with automatic SQLite data migration.
+* **Decoupled Engines:** The calculation modules (`optical`, `cost`, `pole`) are pure domain services operating on deterministic models. They can be invoked independently via unit tests or script pipelines without running a web server.
+* **In-Memory & API Modes:** The frontend includes an in-memory client adapter for standalone browser testing and seamlessly connects to the backend when `VITE_API_BASE_URL` is configured.
 
 ---
 
@@ -140,10 +146,11 @@ flowchart TD
 | **Language (Frontend)** | TypeScript | `~5.6.2` | Static type safety and strict schema alignment |
 | **Build Tooling** | Vite | `^8.3.6` | Fast development server and production bundler |
 | **Mapping & GIS** | Leaflet & React-Leaflet | `1.9.4` / `4.2.1` | Interactive vector map and layer rendering |
-| **Backend (Rust)** | Axum + Tokio + SQLx | `0.8` / `0.8` | High-performance native async REST API |
+| **Backend (Rust)** | Axum + Tokio | `0.8` / `1.40` | High-performance native async REST API |
 | **Backend (Python)** | FastAPI + Uvicorn | `>=0.115.0` | Alternative Python async REST API |
-| **Data Validation** | Pydantic (v2) / Serde | `>=2.8.0` / `1.0` | Strict request/response schema modeling |
-| **Database** | SQLite 3 | Embedded | Single-file persistent document-aggregate store |
+| **Data Validation** | Serde / Pydantic (v2) | `1.0` / `>=2.8` | Strict request/response schema modeling |
+| **Database (Native Rust)** | Redb | `4.6.0` | Pure-Rust embedded ACID B-tree database (`ftth_simulator.redb`) |
+| **Database (SQL Fallback)** | SQLite 3 | Embedded | Single-file SQL aggregate store (`ftth_simulator.db`) |
 | **Testing (Backend)** | Cargo test / Pytest | Native / `>=8.0` | Automated backend engine and API route testing |
 | **Testing (Frontend)** | Vitest & JSDOM | `^5.1.0` / `^25.0.1` | Unit and component integration testing |
 | **Containerization** | Docker | Multi-stage | Alpine Node.js builder + runtime |
@@ -154,7 +161,7 @@ flowchart TD
 
 ```text
 .
-├── backend-rust/           # High-performance native Rust backend (Axum, Tokio, SQLx SQLite)
+├── backend-rust/           # High-performance native Rust backend (Axum, Tokio, Redb database)
 │   ├── src/                # Cost, optical budget, pole span, and validation engines
 │   └── Cargo.toml          # Rust dependencies & binary configuration
 ├── backend/                # Python FastAPI reference implementation
@@ -175,6 +182,8 @@ flowchart TD
 │   │   ├── inspectors/     # Node, cable, and customer configuration editors
 │   │   └── reports/        # Engineering reports, optical tables, and RAB sheets
 │   └── styles.css          # Application layout styling and formal report design
+├── ftth_simulator.redb     # Pure-Rust embedded ACID database (Default for Rust backend)
+├── ftth_simulator.db       # SQLite database (Fallback / portable SQL format)
 ├── Dockerfile              # Production multi-stage Docker build specification
 ├── render.yaml             # Render Blueprint configuration for single-container deployment
 ├── package.json            # Node.js dependencies and frontend scripts
@@ -238,6 +247,7 @@ Ensure `.env.local` contains:
 ```dotenv
 VITE_API_BASE_URL=/api/v1
 FTTH_ENVIRONMENT=development
+FTTH_REDB_PATH=ftth_simulator.redb
 FTTH_DATABASE_URL=sqlite:///./ftth_simulator.db
 VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 ```
