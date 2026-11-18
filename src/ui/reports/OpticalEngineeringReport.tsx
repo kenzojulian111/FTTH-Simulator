@@ -1136,39 +1136,51 @@ export function OpticalEngineeringReport({
               </tr>
             </thead>
             <tbody>
-              {(opticalPowerSummary.onts.length ? opticalPowerSummary.onts : detailedLinkBudgets).map((ontRow, idx) => {
-                const row = ontRow as unknown as Record<string, unknown>;
-                const ontName = typeof row.ontName === "string" ? row.ontName : "";
-                const custName = Array.isArray(row.customerNames) ? row.customerNames.join(", ") : (typeof row.customerNames === "string" ? row.customerNames : "");
-                const odpName = typeof row.parentOdpName === "string" ? row.parentOdpName : (typeof row.odpName === "string" ? row.odpName : "");
-                const routeLen = typeof row.pathLengthM === "number" ? row.pathLengthM : (typeof row.routeLengthM === "number" ? row.routeLengthM : null);
-                const fiberLoss = typeof row.totalFiberLossDb === "number" ? row.totalFiberLossDb : (typeof row.fiberLossDb === "number" ? row.fiberLossDb : null);
-                const totLoss = typeof row.totalLossDb === "number" ? row.totalLossDb : (typeof row.totalAccumulatedLossDb === "number" ? row.totalAccumulatedLossDb : null);
-                const rxDbm = typeof row.estimatedRxDbm === "number" ? row.estimatedRxDbm : (typeof row.receivedPowerDbm === "number" ? row.receivedPowerDbm : null);
-                const margin = typeof row.sensitivityMarginDb === "number" ? row.sensitivityMarginDb : (typeof row.marginDb === "number" ? row.marginDb : null);
-                const status = typeof row.status === "string" ? row.status : "PASS";
+              {(() => {
+                const list = opticalPowerSummary.onts.length ? opticalPowerSummary.onts : detailedLinkBudgets;
+                const sortedList = [...list].sort((a, b) => {
+                  const getNum = (item: unknown) => {
+                    const row = item as Record<string, unknown>;
+                    const str = (Array.isArray(row.customerNames) ? row.customerNames.join(" ") : String(row.customerNames ?? "")) || String(row.ontName ?? "");
+                    const m = str.match(/\d+/);
+                    return m ? parseInt(m[0], 10) : 9999;
+                  };
+                  return getNum(a) - getNum(b);
+                });
+                return sortedList.map((ontRow, idx) => {
+                  const row = ontRow as unknown as Record<string, unknown>;
+                  const ontName = typeof row.ontName === "string" ? row.ontName : "";
+                  const custName = Array.isArray(row.customerNames) ? row.customerNames.join(", ") : (typeof row.customerNames === "string" ? row.customerNames : "");
+                  const odpName = typeof row.parentOdpName === "string" ? row.parentOdpName : (typeof row.odpName === "string" ? row.odpName : "");
+                  const routeLen = typeof row.pathLengthM === "number" ? row.pathLengthM : (typeof row.routeLengthM === "number" ? row.routeLengthM : null);
+                  const fiberLoss = typeof row.totalFiberLossDb === "number" ? row.totalFiberLossDb : (typeof row.fiberLossDb === "number" ? row.fiberLossDb : null);
+                  const totLoss = typeof row.totalLossDb === "number" ? row.totalLossDb : (typeof row.totalAccumulatedLossDb === "number" ? row.totalAccumulatedLossDb : null);
+                  const rxDbm = typeof row.estimatedRxDbm === "number" ? row.estimatedRxDbm : (typeof row.receivedPowerDbm === "number" ? row.receivedPowerDbm : null);
+                  const margin = typeof row.sensitivityMarginDb === "number" ? row.sensitivityMarginDb : (typeof row.marginDb === "number" ? row.marginDb : null);
+                  const status = typeof row.status === "string" ? row.status : "PASS";
 
-                return (
-                  <tr key={idx}>
-                    <td style={{ textAlign: "center", color: "#64748b" }}>{idx + 1}</td>
-                    <td><strong>{stripUuidParenthesesOnly(ontName)}</strong></td>
-                    <td>{custName || "—"}</td>
-                    <td>{stripUuidParenthesesOnly(odpName)}</td>
-                    <td className="numeric">{routeLen != null ? formatReportNumber(routeLen) : "—"}</td>
-                    <td className="numeric">{fiberLoss != null ? formatReportNumber(fiberLoss) : "—"}</td>
-                    <td className="numeric">{totLoss != null ? formatReportNumber(totLoss) : "—"}</td>
-                    <td className="numeric">
-                      <strong>{rxDbm != null ? formatReportNumber(rxDbm) : "—"}</strong>
-                    </td>
-                    <td className="numeric">{margin != null ? `${formatReportNumber(margin)} dB` : "—"}</td>
-                    <td style={{ textAlign: "center" }}>
-                      <span className={`status-text-${status.toLowerCase()}`}>
-                        {status.toUpperCase()}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr key={idx}>
+                      <td style={{ textAlign: "center", color: "#64748b" }}>{idx + 1}</td>
+                      <td><strong>{stripUuidParenthesesOnly(ontName)}</strong></td>
+                      <td>{custName || "—"}</td>
+                      <td>{stripUuidParenthesesOnly(odpName)}</td>
+                      <td className="numeric">{routeLen != null ? formatReportNumber(routeLen) : "—"}</td>
+                      <td className="numeric">{fiberLoss != null ? formatReportNumber(fiberLoss) : "—"}</td>
+                      <td className="numeric">{totLoss != null ? formatReportNumber(totLoss) : "—"}</td>
+                      <td className="numeric">
+                        <strong>{rxDbm != null ? formatReportNumber(rxDbm) : "—"}</strong>
+                      </td>
+                      <td className="numeric">{margin != null ? `${formatReportNumber(margin)} dB` : "—"}</td>
+                      <td style={{ textAlign: "center" }}>
+                        <span className={`status-text-${status.toLowerCase()}`}>
+                          {status.toUpperCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
             </tbody>
           </table>
         </div>
