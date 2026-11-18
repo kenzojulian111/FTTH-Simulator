@@ -30,20 +30,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Determine database path
-    let db_url = if let Ok(env_url) = std::env::var("FTTH_DATABASE_URL") {
-        env_url
-    } else if let Ok(env_url) = std::env::var("DATABASE_URL") {
-        env_url
-    } else if Path::new("ftth_simulator.db").exists() {
-        "sqlite://./ftth_simulator.db".to_string()
-    } else if Path::new("../ftth_simulator.db").exists() {
-        "sqlite://../ftth_simulator.db".to_string()
+    let redb_path = if let Ok(env_path) = std::env::var("FTTH_REDB_PATH") {
+        env_path
+    } else if Path::new("ftth_simulator.redb").exists() {
+        "ftth_simulator.redb".to_string()
+    } else if Path::new("../ftth_simulator.redb").exists() {
+        "../ftth_simulator.redb".to_string()
     } else {
-        "sqlite://./ftth_simulator.db".to_string()
+        "ftth_simulator.redb".to_string()
     };
 
-    tracing::info!("Connecting to SQLite database: {}", db_url);
-    let db = Database::new(&db_url).await?;
+    let sqlite_url = std::env::var("FTTH_DATABASE_URL").ok();
+
+    tracing::info!("Initializing Pure-Rust Redb database at: {}", redb_path);
+    let db = Database::new(&redb_path, sqlite_url.as_deref())
+        .await
+        .map_err(|e| format!("Failed to initialize database: {}", e))?;
     let geocoding = Arc::new(GeocodingService::new());
 
     let state = AppState { db, geocoding };

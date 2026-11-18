@@ -127,7 +127,6 @@ async fn list_projects(State(state): State<AppState>) -> Result<Json<ProjectList
     let summaries = state
         .db
         .list_projects()
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(ProjectListResponse {
         projects: summaries,
@@ -144,7 +143,6 @@ async fn create_project(
     let saved = state
         .db
         .save_project(project)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok((StatusCode::CREATED, Json(saved)))
 }
@@ -156,7 +154,6 @@ async fn get_project(
     let project = state
         .db
         .get_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     match project {
@@ -177,7 +174,6 @@ async fn save_project(
     let saved = state
         .db
         .save_project(project)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(saved))
 }
@@ -189,7 +185,6 @@ async fn delete_project(
     let success = state
         .db
         .delete_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if success {
@@ -210,7 +205,6 @@ async fn run_optical_budget(
     let project = state
         .db
         .get_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| {
             AppError(
@@ -235,7 +229,6 @@ async fn run_construction_cost(
     let project = state
         .db
         .get_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| {
             AppError(
@@ -259,7 +252,6 @@ async fn run_pole_spans(
     let project = state
         .db
         .get_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| {
             AppError(
@@ -279,7 +271,6 @@ async fn get_validate_topology(
     let project = state
         .db
         .get_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| {
             AppError(
@@ -303,7 +294,6 @@ async fn post_validate_topology(
         state
             .db
             .get_project(&project_id)
-            .await
             .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .ok_or_else(|| {
                 AppError(
@@ -328,7 +318,6 @@ async fn validate_connection(
         state
             .db
             .get_project(&project_id)
-            .await
             .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .ok_or_else(|| {
                 AppError(
@@ -357,7 +346,6 @@ async fn validate_project_node_router(
     let project = state
         .db
         .get_project(&project_id)
-        .await
         .map_err(|e| AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| {
             AppError(

@@ -1,127 +1,113 @@
-use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
+use redb::{Database as RedbDb, ReadableDatabase, ReadableTable, TableDefinition};
+use sqlx::{sqlite::SqlitePoolOptions, Row};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::geo::update_cable_lengths;
 use crate::models::{
-    current_utc_timestamp, Customer, NetworkNode, Project, ProjectSummary,
+    current_utc_timestamp, Project, ProjectSummary,
 };
+
+const PROJECTS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("projects");
 
 #[derive(Clone)]
 pub struct Database {
-    pub pool: Arc<SqlitePool>,
+    pub redb: Arc<RedbDb>,
 }
 
 impl Database {
-    pub async fn new(database_url: &str) -> Result<Self, sqlx::Error> {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await?;
+    pub async fn new(redb_path: &str, sqlite_fallback_url: Option<&str>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let path = Path::new(redb_path);
+        let exists = path.exists();
+
+        let db = if exists {
+            tracing::info!("Opening existing Pure-Rust Redb database: {}", redb_path);
+            RedbDb::open(path)?
+        } else {
+            tracing::info!("Creating new Pure-Rust Redb database: {}", redb_path);
+            RedbDb::create(path)?
+        };
 
         // Ensure table exists
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                currency TEXT DEFAULT 'IDR',
-                nodes_data JSON NOT NULL DEFAULT '[]',
-                customers_data JSON NOT NULL DEFAULT '[]',
-                cable_segments_data JSON NOT NULL DEFAULT '[]',
-                connections_data JSON NOT NULL DEFAULT '[]',
-                pole_spans_data JSON NOT NULL DEFAULT '[]',
-                optical_components_data JSON NOT NULL DEFAULT '[]',
-                areas_data JSON NOT NULL DEFAULT '[]',
-                settings_data JSON NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-
-        Ok(Self {
-            pool: Arc::new(pool),
-        })
-    }
-
-    pub async fn list_projects(&self) -> Result<Vec<ProjectSummary>, sqlx::Error> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, name, description, currency, created_at, updated_at,
-                   nodes_data, customers_data, cable_segments_data, connections_data
-            FROM projects
-            ORDER BY updated_at DESC
-            "#,
-        )
-        .fetch_all(&*self.pool)
-        .await?;
-
-        let mut summaries = Vec::new();
-        for row in rows {
-            let id: String = row.get("id");
-            let name: String = row.get("name");
-            let description: String = row.try_get("description").unwrap_or_default();
-            let currency: String = row.try_get("currency").unwrap_or_else(|_| "IDR".to_string());
-            let created_at: Option<String> = row.try_get("created_at").ok();
-            let updated_at: String = row.get("updated_at");
-
-            let nodes_json: String = row.get("nodes_data");
-            let customers_json: String = row.get("customers_data");
-            let cables_json: String = row.get("cable_segments_data");
-            let connections_json: String = row.get("connections_data");
-
-            let nodes: Vec<NetworkNode> = serde_json::from_str(&nodes_json).unwrap_or_default();
-            let customers: Vec<Customer> = serde_json::from_str(&customers_json).unwrap_or_default();
-            let cables: Vec<serde_json::Value> = serde_json::from_str(&cables_json).unwrap_or_default();
-            let connections: Vec<serde_json::Value> = serde_json::from_str(&connections_json).unwrap_or_default();
-
-            let mut device_counts: HashMap<String, usize> = HashMap::new();
-            for n in &nodes {
-                let ntype = n.r#type.as_str().to_string();
-                *device_counts.entry(ntype).or_insert(0) += 1;
+        {
+            let write_txn = db.begin_write()?;
+            {
+                let _ = write_txn.open_table(PROJECTS_TABLE)?;
             }
-            if !customers.is_empty() {
-                device_counts.insert("customer".to_string(), customers.len());
-            }
-
-            summaries.append(&mut vec![ProjectSummary {
-                id,
-                name,
-                description,
-                currency,
-                created_at,
-                updated_at,
-                node_count: nodes.len(),
-                customer_count: customers.len(),
-                cable_segment_count: cables.len(),
-                connection_count: connections.len(),
-                device_counts,
-            }]);
+            write_txn.commit()?;
         }
 
-        Ok(summaries)
+        let database = Self {
+            redb: Arc::new(db),
+        };
+
+        // Check if database is empty and auto-migrate from SQLite if available
+        let project_count = database.count_projects()?;
+        if project_count == 0 {
+            tracing::info!("Redb database is empty. Checking for SQLite database to migrate data...");
+            let sqlite_path = sqlite_fallback_url.unwrap_or_else(|| {
+                if Path::new("ftth_simulator.db").exists() {
+                    "sqlite://./ftth_simulator.db"
+                } else if Path::new("../ftth_simulator.db").exists() {
+                    "sqlite://../ftth_simulator.db"
+                } else {
+                    "sqlite://./ftth_simulator.db"
+                }
+            });
+
+            if let Err(e) = database.migrate_from_sqlite(sqlite_path).await {
+                tracing::warn!("SQLite auto-migration skipped or failed: {}", e);
+            }
+        } else {
+            tracing::info!("Pure-Rust Redb database ready with {} projects.", project_count);
+        }
+
+        Ok(database)
     }
 
-    pub async fn get_project(&self, project_id: &str) -> Result<Option<Project>, sqlx::Error> {
-        let row = sqlx::query(
+    pub fn count_projects(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let read_txn = self.redb.begin_read()?;
+        let table = read_txn.open_table(PROJECTS_TABLE)?;
+        let mut count = 0;
+        let iter = table.iter()?;
+        for _ in iter {
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    pub async fn migrate_from_sqlite(&self, sqlite_url: &str) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        tracing::info!("Starting auto-migration from SQLite: {}", sqlite_url);
+
+        let pool = match SqlitePoolOptions::new().max_connections(1).connect(sqlite_url).await {
+            Ok(p) => p,
+            Err(e) => {
+                return Err(format!("Could not connect to SQLite {}: {}", sqlite_url, e).into());
+            }
+        };
+
+        let rows = sqlx::query(
             r#"
             SELECT id, name, description, currency, created_at, updated_at,
                    nodes_data, customers_data, cable_segments_data, connections_data,
                    pole_spans_data, optical_components_data, areas_data, settings_data
             FROM projects
-            WHERE id = ?
             "#,
         )
-        .bind(project_id)
-        .fetch_optional(&*self.pool)
+        .fetch_all(&pool)
         .await?;
 
-        match row {
-            Some(row) => {
+        if rows.is_empty() {
+            tracing::info!("No projects found in SQLite database.");
+            return Ok(0);
+        }
+
+        let mut migrated = 0;
+        let write_txn = self.redb.begin_write()?;
+        {
+            let mut table = write_txn.open_table(PROJECTS_TABLE)?;
+            for row in rows {
                 let id: String = row.get("id");
                 let name: String = row.get("name");
                 let description: String = row.try_get("description").unwrap_or_default();
@@ -139,7 +125,7 @@ impl Database {
                 let settings_data: String = row.get("settings_data");
 
                 let project = Project {
-                    id,
+                    id: id.clone(),
                     name,
                     description,
                     currency,
@@ -155,81 +141,105 @@ impl Database {
                     updated_at,
                 };
 
-                Ok(Some(project))
+                let serialized = serde_json::to_string(&project)?;
+                table.insert(id.as_str(), serialized.as_str())?;
+                migrated += 1;
             }
-            None => Ok(None),
+        }
+        write_txn.commit()?;
+
+        tracing::info!(
+            "SUCCESS: Migrated {} projects from SQLite to Pure-Rust Redb database!",
+            migrated
+        );
+        Ok(migrated)
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<ProjectSummary>, Box<dyn std::error::Error + Send + Sync>> {
+        let read_txn = self.redb.begin_read()?;
+        let table = read_txn.open_table(PROJECTS_TABLE)?;
+
+        let mut summaries = Vec::new();
+        let iter = table.iter()?;
+        for item in iter {
+            let (_key, val) = item?;
+            let project: Project = match serde_json::from_str(val.value()) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("Failed to parse project JSON: {}", e);
+                    continue;
+                }
+            };
+
+            let mut device_counts: HashMap<String, usize> = HashMap::new();
+            for n in &project.nodes {
+                let ntype = n.r#type.as_str().to_string();
+                *device_counts.entry(ntype).or_insert(0) += 1;
+            }
+            if !project.customers.is_empty() {
+                device_counts.insert("customer".to_string(), project.customers.len());
+            }
+
+            summaries.push(ProjectSummary {
+                id: project.id,
+                name: project.name,
+                description: project.description,
+                currency: project.currency,
+                created_at: Some(project.created_at),
+                updated_at: project.updated_at,
+                node_count: project.nodes.len(),
+                customer_count: project.customers.len(),
+                cable_segment_count: project.cable_segments.len(),
+                connection_count: project.connections.len(),
+                device_counts,
+            });
+        }
+
+        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(summaries)
+    }
+
+    pub fn get_project(&self, project_id: &str) -> Result<Option<Project>, Box<dyn std::error::Error + Send + Sync>> {
+        let read_txn = self.redb.begin_read()?;
+        let table = read_txn.open_table(PROJECTS_TABLE)?;
+
+        if let Some(val) = table.get(project_id)? {
+            let project: Project = serde_json::from_str(val.value())?;
+            Ok(Some(project))
+        } else {
+            Ok(None)
         }
     }
 
-    pub async fn save_project(&self, mut project: Project) -> Result<Project, sqlx::Error> {
+    pub fn save_project(&self, mut project: Project) -> Result<Project, Box<dyn std::error::Error + Send + Sync>> {
         update_cable_lengths(&mut project.cable_segments);
         project.updated_at = current_utc_timestamp();
 
-        let nodes_json = serde_json::to_string(&project.nodes).unwrap_or_else(|_| "[]".to_string());
-        let customers_json = serde_json::to_string(&project.customers).unwrap_or_else(|_| "[]".to_string());
-        let cables_json = serde_json::to_string(&project.cable_segments).unwrap_or_else(|_| "[]".to_string());
-        let conns_json = serde_json::to_string(&project.connections).unwrap_or_else(|_| "[]".to_string());
-        let spans_json = serde_json::to_string(&project.pole_spans).unwrap_or_else(|_| "[]".to_string());
-        let opt_comps_json = serde_json::to_string(&project.optical_components).unwrap_or_else(|_| "[]".to_string());
-        let areas_json = serde_json::to_string(&project.areas).unwrap_or_else(|_| "[]".to_string());
-        let settings_json = serde_json::to_string(&project.settings).unwrap_or_else(|_| "{}".to_string());
+        let existing = self.get_project(&project.id)?;
+        if let Some(existing_p) = existing {
+            project.created_at = existing_p.created_at;
+        }
 
-        let existing_created_at: Option<String> = sqlx::query_scalar("SELECT created_at FROM projects WHERE id = ?")
-            .bind(&project.id)
-            .fetch_optional(&*self.pool)
-            .await?;
+        let serialized = serde_json::to_string(&project)?;
 
-        let created_at = existing_created_at.unwrap_or_else(|| project.created_at.clone());
-        project.created_at = created_at.clone();
-
-        sqlx::query(
-            r#"
-            INSERT INTO projects (
-                id, name, description, currency, created_at, updated_at,
-                nodes_data, customers_data, cable_segments_data, connections_data,
-                pole_spans_data, optical_components_data, areas_data, settings_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                description = excluded.description,
-                currency = excluded.currency,
-                updated_at = excluded.updated_at,
-                nodes_data = excluded.nodes_data,
-                customers_data = excluded.customers_data,
-                cable_segments_data = excluded.cable_segments_data,
-                connections_data = excluded.connections_data,
-                pole_spans_data = excluded.pole_spans_data,
-                optical_components_data = excluded.optical_components_data,
-                areas_data = excluded.areas_data,
-                settings_data = excluded.settings_data
-            "#,
-        )
-        .bind(&project.id)
-        .bind(&project.name)
-        .bind(&project.description)
-        .bind(&project.currency)
-        .bind(&created_at)
-        .bind(&project.updated_at)
-        .bind(&nodes_json)
-        .bind(&customers_json)
-        .bind(&cables_json)
-        .bind(&conns_json)
-        .bind(&spans_json)
-        .bind(&opt_comps_json)
-        .bind(&areas_json)
-        .bind(&settings_json)
-        .execute(&*self.pool)
-        .await?;
+        let write_txn = self.redb.begin_write()?;
+        {
+            let mut table = write_txn.open_table(PROJECTS_TABLE)?;
+            table.insert(project.id.as_str(), serialized.as_str())?;
+        }
+        write_txn.commit()?;
 
         Ok(project)
     }
 
-    pub async fn delete_project(&self, project_id: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM projects WHERE id = ?")
-            .bind(project_id)
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(result.rows_affected() > 0)
+    pub fn delete_project(&self, project_id: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let write_txn = self.redb.begin_write()?;
+        let deleted = {
+            let mut table = write_txn.open_table(PROJECTS_TABLE)?;
+            let is_some = table.remove(project_id)?.is_some();
+            is_some
+        };
+        write_txn.commit()?;
+        Ok(deleted)
     }
 }
