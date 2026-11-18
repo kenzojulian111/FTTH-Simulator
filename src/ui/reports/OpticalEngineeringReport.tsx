@@ -666,7 +666,11 @@ export function OpticalEngineeringReport({
                 {executiveSummary.totalCableLengthM != null ? formatReportNumber(executiveSummary.totalCableLengthM) : "—"}
               </td>
               <td>m</td>
-              <td>{executiveSummary.knownCableLengthCount} of {executiveSummary.totalCables} segments calculated (Desktop GIS / Unverified)</td>
+              <td>
+                {dims.physicalRoute === "VERIFIED"
+                  ? `${executiveSummary.knownCableLengthCount} of ${executiveSummary.totalCables} segments calculated (Field-Verified Route)`
+                  : `${executiveSummary.knownCableLengthCount} of ${executiveSummary.totalCables} segments calculated (Desktop GIS / Unverified)`}
+              </td>
             </tr>
             <tr>
               <td>Feeder Cable Total Length</td>
@@ -674,7 +678,13 @@ export function OpticalEngineeringReport({
                 {feederCategory?.totalLengthM != null ? formatReportNumber(feederCategory.totalLengthM) : "—"}
               </td>
               <td>m</td>
-              <td>{feederCategory ? `${feederCategory.knownLengthCount} of ${feederCategory.cableCount} segment calculated (Desktop GIS / Unverified)` : "Central office feeder route"}</td>
+              <td>
+                {feederCategory
+                  ? dims.physicalRoute === "VERIFIED"
+                    ? `${feederCategory.knownLengthCount} of ${feederCategory.cableCount} segment calculated (Field-Verified Route)`
+                    : `${feederCategory.knownLengthCount} of ${feederCategory.cableCount} segment calculated (Desktop GIS / Unverified)`
+                  : "Central office feeder route"}
+              </td>
             </tr>
             <tr>
               <td>Distribution Cable Total Length</td>
@@ -1547,7 +1557,10 @@ export function OpticalEngineeringReport({
           </tbody>
         </table>
         <p style={{ margin: "6px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Route vs. Procurement Note:</strong> Route lengths reflect candidate GIS road centerline distances generated via OpenStreetMap/OSRM routing (Status: Estimated / Unverified). A standard 10.0% slack allowance is included for splice loops, pole transitions, building entry, and thermal expansion to determine material procurement requirements.
+          <strong>Route vs. Procurement Note:</strong>{" "}
+          {dims.physicalRoute === "VERIFIED"
+            ? "Route lengths reflect field-verified on-site physical surveyed distances (Status: Verified). A standard 10.0% slack allowance is included for splice loops, pole transitions, building entry, and thermal expansion to determine material procurement requirements."
+            : "Route lengths reflect candidate GIS road centerline distances generated via OpenStreetMap/OSRM routing (Status: Estimated / Unverified). A standard 10.0% slack allowance is included for splice loops, pole transitions, building entry, and thermal expansion to determine material procurement requirements."}
         </p>
 
         <h3 className="formal-subsection-header" style={{ marginTop: "16px" }}>11.1 Feeder &amp; Distribution Cable Schedule</h3>
@@ -1754,7 +1767,7 @@ export function OpticalEngineeringReport({
                   ? `${conclusion.infrastructure.longestCable.name} (${formatReportNumber(conclusion.infrastructure.longestCable.lengthM)} m · ${conclusion.infrastructure.longestCable.categoryLabel})`
                   : "Cable 6 (1,120.08 m · Feeder)"}
               </td>
-              <td>Desktop GIS route (Unverified)</td>
+              <td>{dims.physicalRoute === "VERIFIED" ? "Field-verified route (Verified)" : "Desktop GIS route (Unverified)"}</td>
             </tr>
             <tr>
               <td>Disconnected Customer Records</td>
