@@ -12,7 +12,21 @@ pub fn is_allowed_optical_transition(from_type: &NodeType, to_type: &NodeType) -
         NodeType::Odc => matches!(to_type, NodeType::Odc | NodeType::Odp | NodeType::Splitter | NodeType::Ont),
         NodeType::Odp => matches!(to_type, NodeType::Odp | NodeType::Splitter | NodeType::Ont),
         NodeType::Splitter => matches!(to_type, NodeType::Odc | NodeType::Odp | NodeType::Splitter | NodeType::Ont),
-        NodeType::Ont | NodeType::Pole | NodeType::Manhole | NodeType::Handhole | NodeType::Router | NodeType::Customer | NodeType::Unknown => false,
+        NodeType::Ont | NodeType::Pole | NodeType::Manhole | NodeType::Handhole | NodeType::Annotation | NodeType::Router | NodeType::Customer | NodeType::Unknown => false,
+    }
+}
+
+#[cfg(test)]
+mod physical_node_tests {
+    use super::is_allowed_optical_transition;
+    use crate::models::NodeType;
+
+    #[test]
+    fn manholes_and_handholes_are_not_optical_topology_nodes() {
+        for physical in [NodeType::Manhole, NodeType::Handhole, NodeType::Annotation] {
+            assert!(!is_allowed_optical_transition(&NodeType::Olt, &physical));
+            assert!(!is_allowed_optical_transition(&physical, &NodeType::Ont));
+        }
     }
 }
 

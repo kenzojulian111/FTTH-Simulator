@@ -24,7 +24,7 @@ function SearchNavigation({ result }: { result: GeocodingResult | null }) {
 
 function makeIcon(type: string, selected: boolean, geographicallyPlaced: boolean, endpoint: "start" | "end" | "candidate" | null) {
   const endpointClass = endpoint ? ` cable-endpoint-${endpoint}` : "";
-  return L.divIcon({ className: `map-pin-wrap ${geographicallyPlaced ? "" : "map-pin-unplaced"}${endpoint ? " cable-endpoint-wrap" : ""}`, html: `<span class="map-pin pin-${type} ${selected ? "selected" : ""}${endpointClass}">${type === "customer" ? "⌂" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "router" ? "R" : type.toUpperCase()}</span>`, iconSize: [36, 36], iconAnchor: [18, 18] });
+  return L.divIcon({ className: `map-pin-wrap ${geographicallyPlaced ? "" : "map-pin-unplaced"}${endpoint ? " cable-endpoint-wrap" : ""}`, html: `<span class="map-pin pin-${type} ${selected ? "selected" : ""}${endpointClass}">${type === "customer" ? "⌂" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "annotation" ? "•" : type === "router" ? "R" : type.toUpperCase()}</span>`, iconSize: [36, 36], iconAnchor: [18, 18] });
 }
 
 function MapEvents({ onMapClick, onMapMove, cableDrawing, drawing }: {

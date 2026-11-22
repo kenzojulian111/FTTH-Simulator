@@ -12,6 +12,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
   const [projectName, setProjectName] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [backendUnsupported, setBackendUnsupported] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleFilesSelected(fileList: FileList | null) {
@@ -44,7 +45,9 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
       const project = await onImport(selectedFiles, projectName.trim() || undefined);
       onSuccess(project);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to import KMZ file. Check the server connection.");
+      const message = err instanceof Error ? err.message : "Failed to import KMZ file. Check the server connection.";
+      setError(message);
+      if (message.includes("This Rust backend does not provide KMZ/KML import")) setBackendUnsupported(true);
     } finally {
       setLoading(false);
     }
@@ -110,18 +113,22 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
 
           <div className="kmz-feature-features-box">
             <h4>Automatic Capabilities:</h4>
+            {!backendUnsupported && <p role="note" className="kmz-backend-note">KMZ/KML import and export require the Python FastAPI backend. Rust supports the optical and RAB APIs, but not KMZ endpoints.</p>}
             <ul>
               <li><strong>Multi-file import:</strong> Select multiple KMZ/KML files at once and combine them into one project.</li>
-              <li><strong>Placemark Recognition:</strong> Auto-classifies OLT, ODC, ODP, Poles, and Customers by name/folder.</li>
-              <li><strong>Cable Route Snapping:</strong> Geodesic distance calculation and automatic node endpoint connectivity.</li>
-              <li><strong>Optical Splitters:</strong> Auto-provisions integrated 1:8 splitters for immediate budget calculations.</li>
+              <li><strong>Placemark Recognition:</strong> Recognizes OLT, ODC, ODP, poles, manholes, handholes, ONTs, and customer locations from names and folders.</li>
+              <li><strong>Cable Routes:</strong> Calculates route geometry length and only suggests optical endpoint links within the import snap tolerance.</li>
+              <li><strong>Engineering Inputs:</strong> Missing cable specifications, attenuation, and device losses remain unknown; imported names do not invent equipment specs.</li>
             </ul>
           </div>
 
           {error && (
-            <div className="project-library-error" role="alert" style={{ marginTop: "12px" }}>
-              {error}
-            </div>
+            backendUnsupported ? <div className="kmz-backend-error" role="alert">
+              <strong>KMZ import is unavailable on the Rust server.</strong>
+              <span>Stop Rust with Ctrl+C in its running terminal, then start FastAPI in that terminal:</span>
+              <code>source .venv/bin/activate<br />python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000</code>
+              <span>Keep <code>npm run dev</code> running in the other terminal, then close and reopen this dialog.</span>
+            </div> : <div className="project-library-error" role="alert" style={{ marginTop: "12px" }}>{error}</div>
           )}
         </div>
 
@@ -133,9 +140,9 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
             type="button"
             className="primary-button"
             onClick={handleSubmit}
-            disabled={!selectedFiles.length || loading}
+            disabled={!selectedFiles.length || loading || backendUnsupported}
           >
-            {loading ? "Importing & Converting…" : "Import & Open Project"}
+            {loading ? "Importing & Converting…" : backendUnsupported ? "Switch to FastAPI to import" : "Import & Open Project"}
           </button>
         </footer>
       </section>

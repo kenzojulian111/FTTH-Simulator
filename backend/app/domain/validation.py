@@ -53,6 +53,7 @@ ALLOWED_OPTICAL_TRANSITIONS: Dict[NodeType, Set[NodeType]] = {
     NodeType.POLE: set(),
     NodeType.MANHOLE: set(),
     NodeType.HANDHOLE: set(),
+    NodeType.ANNOTATION: set(),
     NodeType.ROUTER: set(),
     NodeType.CUSTOMER: set(),
 }

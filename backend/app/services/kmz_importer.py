@@ -230,7 +230,7 @@ def parse_kmz_or_kml_bytes(
     cables: List[CableSegment] = []
     areas: List[ProjectArea] = []
 
-    node_counter = {"olt": 0, "odc": 0, "odp": 0, "pole": 0, "manhole": 0, "handhole": 0, "ont": 0}
+    node_counter = {"olt": 0, "odc": 0, "odp": 0, "pole": 0, "manhole": 0, "handhole": 0, "annotation": 0, "ont": 0}
     pending_customers: List[Tuple[Dict[str, Any], Tuple[float, float]]] = []
     roundtrip_connections: List[Dict[str, Any]] = []
     roundtrip_cable_ids = set()
@@ -258,9 +258,14 @@ def parse_kmz_or_kml_bytes(
         # labels (house numbers) and must not be classified as infrastructure.
         if re.match(r"^[tp]\.?(?:\s*)\d+$", name.strip(), re.IGNORECASE):
             return NodeType.POLE, "pole"
-        # Unknown point placemarks most often represent homes in survey files.
-        # Only positively identified infrastructure is imported as a network node.
-        return NodeType.CUSTOMER, "customer"
+        # Some operator exports label subscribers as "NAME 2C TRJT" or
+        # "NAME 2A TELKOM" without explicit customer keywords. Limit this
+        # inference to a terminal area-code pattern; arbitrary POIs stay pins.
+        if re.search(r"\b\d{1,2}[A-Z]\s+[A-Z]{3,}\s*$", name.strip(), re.IGNORECASE):
+            return NodeType.CUSTOMER, "customer_code_suffix"
+        # Keep unidentified points as non-optical annotations. A landmark or
+        # arbitrary map pin must not silently become a planned customer/ONT.
+        return NodeType.ANNOTATION, "annotation"
 
     # Names may suggest a category, but do not establish physical specification.
     def _classify_cable(name: str, desc: str, folder_path: List[str], length_m: float = 0) -> Optional[str]:
@@ -297,6 +302,8 @@ def parse_kmz_or_kml_bytes(
                 cust_name = name if name != "Unnamed Node" else f"Customer {cust_idx}"
                 ont_id = str(uuid.uuid4())
                 ont_name = f"ONT - {cust_name}"
+                inferred_customer_code = bool(re.search(r"\b\d{1,2}[A-Z]\s+[A-Z]{3,}\s*$", name.strip(), re.IGNORECASE))
+                classification_source = "customer_code_suffix" if inferred_customer_code else "name_or_folder_keyword"
 
                 ont_node = NetworkNode(
                     id=ont_id,
@@ -308,6 +315,7 @@ def parse_kmz_or_kml_bytes(
                         "customerId": node_id,
                         "deploymentStatus": "planned",
                         "opticalEquipmentStatus": "configured",
+                        "sourceClassification": classification_source,
                     },
                     created_at=now_iso,
                     updated_at=now_iso,
@@ -324,6 +332,7 @@ def parse_kmz_or_kml_bytes(
                     properties={
                         "geographicPositionSet": True,
                         "source": "google_earth_kmz",
+                        "sourceClassification": classification_source,
                     },
                     created_at=now_iso,
                     updated_at=now_iso,
@@ -344,6 +353,8 @@ def parse_kmz_or_kml_bytes(
                 props["geographicPositionSet"] = True
                 if node_type in {NodeType.POLE, NodeType.MANHOLE, NodeType.HANDHOLE}:
                     props.update({"status": "unverified", "infrastructureKind": node_type.value})
+                elif node_type == NodeType.ANNOTATION:
+                    props.update({"status": "unverified", "sourceClassification": "unclassified_placemark"})
 
             node = NetworkNode(
                 id=node_id,

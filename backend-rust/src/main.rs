@@ -43,9 +43,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sqlite_url = std::env::var("FTTH_DATABASE_URL").ok();
 
     tracing::info!("Initializing Pure-Rust Redb database at: {}", redb_path);
-    let db = Database::new(&redb_path, sqlite_url.as_deref())
-        .await
-        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+    let db = match Database::new(&redb_path, sqlite_url.as_deref()).await {
+        Ok(db) => db,
+        Err(error) if error.to_string().to_ascii_lowercase().contains("already open") => {
+            return Err(format!(
+                "Redb database '{}' is already open by another backend process. Stop the existing Rust backend before starting another one; do not delete the database.",
+                redb_path
+            ).into());
+        }
+        Err(error) => return Err(format!("Failed to initialize database: {}", error).into()),
+    };
     let geocoding = Arc::new(GeocodingService::new());
 
     let state = AppState { db, geocoding };

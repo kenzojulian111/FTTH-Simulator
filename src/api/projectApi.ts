@@ -97,10 +97,13 @@ export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
       if (!response.ok) {
         let message = `Import failed (${response.status}).`;
         let details: string[] = [];
+        if (response.status === 405) {
+          message = "This Rust backend does not provide KMZ/KML import. Stop it and start the FastAPI backend with: source .venv/bin/activate && python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000, then retry.";
+        }
         try {
           const body = await response.json();
-          if (typeof body.detail === "string") message = body.detail;
-          else if (typeof body.error?.message === "string") message = body.error.message;
+          if (response.status !== 405 && typeof body.detail === "string") message = body.detail;
+          else if (response.status !== 405 && typeof body.error?.message === "string") message = body.error.message;
           if (Array.isArray(body.error?.details)) {
             details = body.error.details.map((detail: { field?: string; message?: string }) =>
               `${detail.field ? `${detail.field}: ` : ""}${detail.message ?? "Invalid project data"}`,

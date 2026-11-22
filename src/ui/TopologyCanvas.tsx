@@ -34,7 +34,7 @@ function point(event: ClientPointEvent) {
 }
 
 function symbol(type: string) {
-  return type === "customer" ? "⌂" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase();
+  return type === "customer" ? "⌂" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "annotation" ? "•" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase();
 }
 
 function title(type: string) {

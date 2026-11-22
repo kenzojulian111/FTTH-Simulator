@@ -37,6 +37,7 @@ class NodeType(str, Enum):
     POLE = "pole"
     MANHOLE = "manhole"
     HANDHOLE = "handhole"
+    ANNOTATION = "annotation"
     SPLITTER = "splitter"
     ROUTER = "router"
     CUSTOMER = "customer"

@@ -263,7 +263,7 @@ VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 
 ## Running the Application & Development Workflow
 
-### Option A: Local Development with Rust Backend (Recommended)
+### Option A: Local Development with Rust Backend (Core API)
 
 Run the high-performance Rust backend and React frontend concurrently in two separate terminals:
 
@@ -278,6 +278,7 @@ npm run backend:rust
 * Backend API root: `http://127.0.0.1:8000`
 * Health check: `http://127.0.0.1:8000/health`
 * Database: Pure-Rust embedded Redb (`ftth_simulator.redb`)
+* Optical Budget and RAB endpoints are available. KMZ/KML import and export are currently available through the Python backend below, not this Rust server.
 
 **Terminal 2 — Frontend Dev Server (Port 5173):**
 ```bash

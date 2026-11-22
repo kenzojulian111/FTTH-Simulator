@@ -171,6 +171,12 @@ describe("HTTP project API adapter", () => {
     expect(form.getAll("files")).toHaveLength(2);
   });
 
+  it("explains that KMZ import needs FastAPI when the Rust server returns 405", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 405, json: async () => ({}) }));
+    await expect(createHttpProjectApi("http://localhost:8000/api/v1").importKmz([new File(["kml"], "survey.kmz")]))
+      .rejects.toThrow("This Rust backend does not provide KMZ/KML import");
+  });
+
   it("persists the project before calculating with the canonical saved ID", async () => {
     const project = createEmptyProject("Save before calculation");
     const savedProject = { ...project, updatedAt: "2026-10-17T09:00:00Z" };

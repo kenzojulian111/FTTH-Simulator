@@ -16,6 +16,7 @@ pub enum NodeType {
     Pole,
     Manhole,
     Handhole,
+    Annotation,
     Splitter,
     Router,
     Customer,
@@ -33,6 +34,7 @@ impl NodeType {
             NodeType::Pole => "pole",
             NodeType::Manhole => "manhole",
             NodeType::Handhole => "handhole",
+            NodeType::Annotation => "annotation",
             NodeType::Splitter => "splitter",
             NodeType::Router => "router",
             NodeType::Customer => "customer",
@@ -1094,4 +1096,23 @@ pub struct ErrorBody {
 #[serde(rename_all = "camelCase")]
 pub struct ErrorEnvelope {
     pub error: ErrorBody,
+}
+
+#[cfg(test)]
+mod node_type_tests {
+    use super::NodeType;
+
+    #[test]
+    fn physical_access_nodes_round_trip_without_becoming_unknown() {
+        for (wire, expected) in [
+            ("\"manhole\"", NodeType::Manhole),
+            ("\"handhole\"", NodeType::Handhole),
+            ("\"annotation\"", NodeType::Annotation),
+        ] {
+            let parsed: NodeType = serde_json::from_str(wire).expect("known physical node type");
+            assert_eq!(parsed, expected);
+            assert_eq!(serde_json::to_string(&parsed).unwrap(), wire);
+            assert_eq!(parsed.as_str(), wire.trim_matches('"'));
+        }
+    }
 }

@@ -134,15 +134,29 @@ def test_imports_house_named_points_and_residential_polygons_as_customers():
     assert len(project.areas) == 1
 
 
-def test_unclassified_and_bare_number_points_import_as_customers_not_poles():
+def test_unclassified_and_bare_number_points_stay_annotations_not_customers_or_onts():
     kml = """<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
       <Placemark><name>The Eiffel Tower</name><Point><coordinates>2.2945,48.8584,0</coordinates></Point></Placemark>
       <Placemark><name>12</name><Point><coordinates>119.45,-5.15,0</coordinates></Point></Placemark>
       <Placemark><name>Tiang T.13</name><Point><coordinates>119.46,-5.16,0</coordinates></Point></Placemark>
     </Document></kml>"""
     project = parse_kmz_or_kml_bytes(kml.encode())
-    assert {customer.name for customer in project.customers} == {"The Eiffel Tower", "12"}
+    assert project.customers == []
+    assert {node.name for node in project.nodes if node.type == NodeType.ANNOTATION} == {"The Eiffel Tower", "12"}
+    assert len(project.nodes) == 3
     assert [node.name for node in project.nodes if node.type == NodeType.POLE] == ["Tiang T.13"]
+
+
+def test_customer_area_code_suffix_is_recognized_with_provenance():
+    kml = b'''<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><name>IMELDA 2C TRJT</name><Point><coordinates>119.50,-5.13,0</coordinates></Point></Placemark>
+      <Placemark><name>The Eiffel Tower</name><Point><coordinates>2.2945,48.8584,0</coordinates></Point></Placemark>
+    </Document></kml>'''
+    project = parse_kmz_or_kml_bytes(kml)
+    assert [customer.name for customer in project.customers] == ["IMELDA 2C TRJT"]
+    ont = next(node for node in project.nodes if node.type == NodeType.ONT)
+    assert ont.properties["sourceClassification"] == "customer_code_suffix"
+    assert next(node for node in project.nodes if node.type == NodeType.ANNOTATION).name == "The Eiffel Tower"
 
 
 def test_imports_manholes_and_handholes_as_unverified_physical_infrastructure():
