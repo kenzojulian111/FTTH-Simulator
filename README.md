@@ -59,6 +59,11 @@ Access network planning typically forces engineers to choose between generic GIS
 * **Subscriber Metric Analytics:** Reports total CAPEX, material subtotal, installation subtotal, and unit cost per connected customer.
 * **Pole Span Analysis:** Evaluates explicit pole-to-pole spans, flags over-length aerial spans, and estimates required intermediate pole additions (`ceil(spanLength / maxSpan) - 1`).
 
+### 5. GIS Interoperability & Google Earth (KMZ / KML)
+* **Two-Way Google Earth Integration:** Import and export complete FTTH network topologies to and from standard Google Earth `.kmz` / `.kml` archives.
+* **Automated KMZ Import:** Parses placemarks, folders, lines, and coordinate sequences into native FTTH entities (OLT, ODC, ODP, ONT, utility poles, customer boundaries, and multi-segment cable routes).
+* **High-Fidelity KMZ Export:** Packages active/passive nodes, subscribers, and cable routes into structured Google Earth folders for field survey, physical verification, and mobile GIS apps.
+
 ---
 
 ## Application Workspace Views
@@ -66,7 +71,7 @@ Access network planning typically forces engineers to choose between generic GIS
 The application provides a unified single-page interface with focused operational panels:
 
 1. **Geographic Network Canvas:** The central map viewport for interactive node placement, route digitizing, vertex editing, and spatial measurement.
-2. **Basemap & Search Controls:** Top bar controls for switching between standard street vector tiles and high-resolution satellite imagery, paired with a debounced location search dropdown.
+2. **Basemap & Search Controls:** Top bar controls for switching between standard street vector tiles and high-resolution satellite imagery, paired with a debounced location search dropdown, plus one-click **Import KMZ** and **Export KMZ** actions.
 3. **Node & Cable Inspector:** Contextual sidebar exposing device properties, port capacities, splitter ratios, fiber counts, deployment methods (aerial, underground, duct), and customer assignments.
 4. **Optical Calculation Table & Engineering Report:** A tabbed workspace presenting per-path link budget summaries, intermediate node power tables, and formal engineering report documents with PDF-ready styling.
 5. **RAB & Pole Planning Dashboard:** Dedicated reports detailing the itemized BoQ cost schedule, currency-formatted CAPEX breakdown, and pole span compliance checks.
@@ -165,8 +170,9 @@ flowchart TD
 │   ├── src/                # Cost, optical budget, pole span, and validation engines
 │   └── Cargo.toml          # Rust dependencies & binary configuration
 ├── backend/                # Python FastAPI reference implementation
-│   ├── app/                # FastAPI routes, schemas, and engines
-│   ├── tests/              # Pytest test suite
+│   ├── app/                # FastAPI routes, schemas, engines, and KMZ services
+│   │   ├── services/       # Geocoding adapter, KMZ importer, and KMZ exporter
+│   ├── tests/              # Pytest test suite (including KMZ import/export tests)
 │   └── requirements.txt    # Python dependencies
 ├── docs/                   # Engineering specifications, API contract, and operational notes
 │   ├── API_CONTRACT.md     # Detailed REST API v1 specification and schema examples
@@ -175,12 +181,13 @@ flowchart TD
 │   └── PROJECT_SPEC.md     # FTTH network data model and lifecycle specification
 ├── reports/                # Engineering audit and route optimization markdown reports
 ├── src/                    # Frontend React SPA
-│   ├── api/                # API client adapters (HTTP and in-memory fallback)
+│   ├── api/                # API client adapters (HTTP, KMZ endpoints, and in-memory fallback)
 │   ├── domain/             # Client-side domain models, validation, and layout helpers
 │   ├── state/              # Application state and event management
 │   ├── ui/                 # React UI components, inspectors, panels, and modal dialogs
 │   │   ├── inspectors/     # Node, cable, and customer configuration editors
-│   │   └── reports/        # Engineering reports, optical tables, and RAB sheets
+│   │   ├── reports/        # Engineering reports, optical tables, and RAB sheets
+│   │   └── ImportKmzDialog.tsx # Interactive dialog for uploading and parsing KMZ files
 │   └── styles.css          # Application layout styling and formal report design
 ├── ftth_simulator.redb     # Pure-Rust embedded ACID database (Default for Rust backend)
 ├── ftth_simulator.db       # SQLite database (Fallback / portable SQL format)
@@ -254,33 +261,38 @@ VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 
 ---
 
-## Running the Application
+## Running the Application & Development Workflow
 
 ### Option A: Local Development with Rust Backend (Recommended)
 
-Run the Rust backend and React frontend concurrently in two separate terminals.
+Run the high-performance Rust backend and React frontend concurrently in two separate terminals:
 
 **Terminal 1 — Rust Backend API (Port 8000):**
 ```bash
 npm run backend:rust
 # Atau untuk mode release yang dioptimasi:
 # npm run backend:rust:release
+# Atau langsung via Cargo:
+# cargo run --manifest-path backend-rust/Cargo.toml
 ```
 * Backend API root: `http://127.0.0.1:8000`
 * Health check: `http://127.0.0.1:8000/health`
+* Database: Pure-Rust embedded Redb (`ftth_simulator.redb`)
 
 **Terminal 2 — Frontend Dev Server (Port 5173):**
 ```bash
 npm run dev
 ```
-* Vite will output the local development address, typically: `http://localhost:5173`
-* Vite automatically proxies requests from `/api/v1` to `http://127.0.0.1:8000`.
+* Web Application: `http://localhost:5173`
+* Vite automatically proxies all `/api/v1/*` requests to the backend at `http://127.0.0.1:8000`.
 
 ---
 
-### Option B: Local Development with Python FastAPI
+### Option B: Local Development with Python FastAPI (Full Feature / KMZ Support)
 
-**Terminal 1 — Python Backend API:**
+Use the Python FastAPI backend when testing Google Earth KMZ / KML import-export workflows:
+
+**Terminal 1 — Python Backend API (Port 8000):**
 ```bash
 source .venv/bin/activate
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
@@ -288,15 +300,17 @@ python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 * Backend API root: `http://127.0.0.1:8000`
 * Interactive API Docs (Swagger): `http://127.0.0.1:8000/docs`
 * Health check: `http://127.0.0.1:8000/health`
+* Database: SQLite aggregate store (`ftth_simulator.db`)
 
-**Terminal 2 — Frontend Dev Server:**
+**Terminal 2 — Frontend Dev Server (Port 5173):**
 ```bash
 npm run dev
 ```
+* Web Application: `http://localhost:5173`
 
 ---
 
-### Option B: Single-Container Docker Execution
+### Option C: Single-Container Docker Execution
 
 The multi-stage [`Dockerfile`](Dockerfile) compiles the React frontend and serves both the static SPA and the FastAPI REST API from a single container:
 
@@ -387,6 +401,8 @@ The backend exposes a fully typed REST API versioned under `/api/v1`. Interactiv
 | `GET`, `POST`| `/api/v1/projects/{projectId}/validate-topology` | Perform comprehensive structural and capacity validation |
 | `POST` | `/api/v1/validate-router-config` | Validate standalone customer router IP configuration |
 | `POST` | `/api/v1/projects/{projectId}/nodes/{nodeId}/validate-router` | Validate router configuration for a specific project node |
+| `POST` | `/api/v1/projects/import-kmz` | Import Google Earth KMZ/KML file into an FTTH project aggregate |
+| `POST` | `/api/v1/projects/{projectId}/export-kmz` | Export FTTH project aggregate as a Google Earth `.kmz` archive |
 | `GET` | `/api/v1/geocoding/search` | Search geographical locations via rate-limited Nominatim adapter |
 
 See [docs/API_CONTRACT.md](docs/API_CONTRACT.md) for full request/response schemas and JSON payloads.
@@ -397,18 +413,26 @@ See [docs/API_CONTRACT.md](docs/API_CONTRACT.md) for full request/response schem
 
 The codebase includes comprehensive unit, integration, and type-checking suites across both frontend and backend.
 
-### Running Backend Tests (Pytest)
+### Running Backend Tests (Rust & Cargo)
+```bash
+cargo test --manifest-path backend-rust/Cargo.toml
+```
+* **Coverage:** Native tests verifying geodesic calculations, Haversine formula, and BoQ calculation logic.
+
+### Running Backend Tests (Python Pytest)
 ```bash
 source .venv/bin/activate
 pytest -q
 ```
-* **Coverage:** 216 tests covering optical budget mathematics, topology validation, cycle detection, BoQ cost estimation, pole span algorithms, and REST routes.
+* **Coverage:** 220 tests covering optical budget mathematics, topology validation, cycle detection, BoQ cost estimation, pole span algorithms, REST routes, and KMZ import/export engines.
 
 ### Running Frontend Tests (Vitest)
 ```bash
 npm test
+# Atau mode watch untuk interaksi langsung:
+# npm run test:watch
 ```
-* **Coverage:** 37 test suites and 219 tests verifying React components, map interaction, inspector dialogs, report tables, and client validation rules.
+* **Coverage:** 24 test suites and 149 tests verifying React components, map interaction, inspector dialogs, report tables, and client validation rules.
 
 ### TypeScript Type Checking
 ```bash
@@ -456,9 +480,11 @@ Transparent engineering assumptions governing current simulation calculations:
 
 ## Roadmap
 
-Planned enhancements for future releases:
+Status fitur dan roadmap pengembangan:
 
-- [ ] **Data Export Formats:** Export network assets to GIS-standard formats (GeoJSON, ESRI Shapefile, and Google Earth KML/KMZ).
+- [x] **Google Earth KMZ / KML Integration:** Import dan export aset jaringan, rute kabel, node, dan lokasi pelanggan langsung ke/dari file `.kmz` / `.kml`.
+- [x] **Pure-Rust Embedded Database (Redb):** Penyimpanan ACID embedded native Rust berperforma tinggi dengan auto-migrasi dari SQLite.
+- [ ] **Data Export Formats:** Export aset jaringan ke format GIS standar tambahan (GeoJSON, ESRI Shapefile).
 - [ ] **Multi-User Collaboration:** User authentication, role-based access control (RBAC), and project revision locking.
 - [ ] **PostgreSQL / PostGIS Adapter:** Optional database driver configuration for spatial indexing and concurrent multi-tenant storage.
 - [ ] **OTDR Trace Ingestion:** Import `.sor` Bellcore/Telcordia trace files to compare simulated link loss directly against real-world field measurements.
