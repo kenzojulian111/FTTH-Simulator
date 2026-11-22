@@ -31,6 +31,7 @@ import type { CanvasPosition, ConnectionEndpoint, PaletteDevice } from "./Topolo
 import { setLogicalPosition } from "../domain/layout";
 import { ProjectLibrary } from "./ProjectLibrary";
 import { SaveAsDialog } from "./SaveAsDialog";
+import { ImportKmzDialog } from "./ImportKmzDialog";
 import { createNamedProjectCopy, forgetActiveProjectId, readActiveProjectId, rememberActiveProjectId, restoreActiveProject } from "./projectSession";
 
 const makeId = () => crypto.randomUUID();
@@ -77,6 +78,7 @@ export function App() {
   const switchingProjectRef = useRef(false);
   const [autosaveWake, setAutosaveWake] = useState(0);
   const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
+  const [importKmzOpen, setImportKmzOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -339,6 +341,28 @@ export function App() {
     finally { setProjectsLoading(false); }
   }
 
+  async function importKmz(file: File, name?: string) { return api.importKmz(file, name); }
+  function acceptImportedProject(project: Project) {
+    projectEpochRef.current += 1;
+    dispatch({ type: "load", project }); setTool(null); setCableDrawing(null); setPreviewPoint(null);
+    setActiveProjectId(project.id); if (api.mode === "http") rememberActiveProjectId(window.sessionStorage, project.id);
+    setSaveStatus("saved"); setSaveError(null); setLastSuccessfulSaveAt(project.updatedAt);
+    setProjectLibraryOpen(false); setImportKmzOpen(false);
+    setNotice(`Imported “${project.name}” with ${project.customers.length} customer(s).`);
+  }
+
+  async function exportKmz() {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || "/api/v1"}/projects/${encodeURIComponent(state.project.id)}/export-kmz`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.project),
+      });
+      if (!response.ok) throw new Error(`KMZ export failed (${response.status}).`);
+      const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a");
+      link.href = url; link.download = `${state.project.name.replace(/[^a-z0-9-_]+/gi, "-") || "ftth-project"}.kmz`; link.click(); URL.revokeObjectURL(url);
+      setNotice("Project exported as KMZ.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "KMZ export failed."); }
+  }
+
   function openProjectLibrary() {
     setProjectLibraryOpen(true);
     void refreshProjects();
@@ -586,7 +610,7 @@ export function App() {
       <div className="project-title"><input aria-label="Project name" value={state.project.name} onChange={(event) => dispatch({ type: "project-name", name: event.target.value })} /><span className="saved-indicator" title={saveError ?? undefined}>{hasCableDraft ? state.dirty ? "Route draft · edits unsaved" : "Route draft · not saved" : saveStatus === "saving" ? "Saving..." : saveStatus === "failed" ? "Save failed" : state.dirty ? "Unsaved changes" : activeProjectId ? "Saved" : "Draft"}</span></div>
       <div className="workspace-tabs" role="tablist" aria-label="Editor mode"><button role="tab" aria-selected={workspaceMode === "topology"} className={workspaceMode === "topology" ? "active" : ""} onClick={() => setWorkspaceMode("topology")}>Logical topology</button><button role="tab" aria-selected={workspaceMode === "geographic"} className={workspaceMode === "geographic" ? "active" : ""} onClick={() => setWorkspaceMode("geographic")}>Geographic map</button></div>
       {cableDrafting && workspaceMode === "topology" && <span className="draw-paused-indicator">Cable drawing paused <button onClick={cancelCableDrawing}>Cancel</button></span>}
-      <div className="top-actions"><span className={`api-status ${api.mode}`}>{api.mode === "memory" ? "LOCAL SESSION" : "API CONFIGURED"}</span>{lastSuccessfulSaveAt && <span className="last-saved-at">Last saved {new Date(lastSuccessfulSaveAt).toLocaleTimeString()}</span>}{saveStatus === "failed" && <span className="save-failed-label" role="status" title={saveError ?? undefined}>Save failed · retry</span>}{hasCableDraft && <span className="save-draft-hint" role="status">Confirm or cancel route to save</span>}<button className="load-button" onClick={openProjectLibrary}>My Projects</button><button className="load-button" onClick={() => { setSaveAsError(null); setSaveAsOpen(true); }} disabled={hasCableDraft || saving} title={cableDraftBlockReason ?? undefined}>Save As</button><button className="primary-button" onClick={save} disabled={saving || hasCableDraft || calculating !== null} title={cableDraftBlockReason ?? saveError ?? undefined}>{saving ? "Saving..." : hasCableDraft ? "Route incomplete" : saveStatus === "failed" ? "Retry Save" : state.dirty ? "Save changes" : "Save"}<span>↗</span></button></div>
+      <div className="top-actions"><span className={`api-status ${api.mode}`}>{api.mode === "memory" ? "LOCAL SESSION" : "API CONFIGURED"}</span>{lastSuccessfulSaveAt && <span className="last-saved-at">Last saved {new Date(lastSuccessfulSaveAt).toLocaleTimeString()}</span>}{saveStatus === "failed" && <span className="save-failed-label" role="status" title={saveError ?? undefined}>Save failed · retry</span>}{hasCableDraft && <span className="save-draft-hint" role="status">Confirm or cancel route to save</span>}<button className="load-button" onClick={() => setImportKmzOpen(true)}>Import KMZ</button><button className="load-button" onClick={() => void exportKmz()} disabled={hasCableDraft}>Export KMZ</button><button className="load-button" onClick={openProjectLibrary}>My Projects</button><button className="load-button" onClick={() => { setSaveAsError(null); setSaveAsOpen(true); }} disabled={hasCableDraft || saving} title={cableDraftBlockReason ?? undefined}>Save As</button><button className="primary-button" onClick={save} disabled={saving || hasCableDraft || calculating !== null} title={cableDraftBlockReason ?? saveError ?? undefined}>{saving ? "Saving..." : hasCableDraft ? "Route incomplete" : saveStatus === "failed" ? "Retry Save" : state.dirty ? "Save changes" : "Save"}<span>↗</span></button></div>
     </header>
     <div className={`workspace ${reportView ? "report-mode" : ""}`}>
       {reportView ? <div className="report-workspace">{reportView === "rab"
@@ -700,5 +724,6 @@ export function App() {
     {connectionDialog && <ConnectionDialog key={`${connectionDialog.fromNodeId ?? ""}-${connectionDialog.toNodeId ?? ""}-${connectionDialog.cableSegmentId ?? ""}`} project={connectionProject} initialSourceId={connectionDialog.fromNodeId} initialDestinationId={connectionDialog.toNodeId} initialCableId={connectionDialog.cableSegmentId} validateWithBackend={api.validateConnection} onRejected={(cableId) => setFailedCableId((current) => current === cableId ? current : cableId)} onClose={() => { setConnectionDialog(null); setPendingCable(null); }} onConnect={createConnection} />}
     {projectLibraryOpen && <ProjectLibrary projects={projects} loading={projectsLoading} loadingProjectId={loadingProjectId} error={projectsError} sessionOnly={api.mode === "memory"} onRefresh={() => void refreshProjects()} onLoad={(project) => void loadProject(project)} onClose={() => setProjectLibraryOpen(false)} />}
     {saveAsOpen && <SaveAsDialog initialName={`${state.project.name} copy`} saving={saveAsSaving} error={saveAsError} onSave={(name) => void saveAs(name)} onClose={() => setSaveAsOpen(false)} />}
+    {importKmzOpen && <ImportKmzDialog onImport={importKmz} onSuccess={acceptImportedProject} onClose={() => setImportKmzOpen(false)} />}
   </main>;
 }

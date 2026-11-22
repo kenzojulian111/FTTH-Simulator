@@ -1,7 +1,7 @@
 """FastAPI routes implementing the FTTH Simulator API contract (v1)."""
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.app.domain.models import (
@@ -28,9 +28,21 @@ from backend.app.engine.optical import calculate_optical_budget
 from backend.app.engine.pole import calculate_pole_spans
 from backend.app.persistence.database import get_db
 from backend.app.persistence.repository import ProjectRepository
+from backend.app.services.kmz_importer import parse_kmz_or_kml_bytes
+from backend.app.services.kmz_exporter import export_project_kmz
 from backend.app.services.geocoding import GeocodingError, search_places
 
 router = APIRouter(prefix="/api/v1", tags=["projects"])
+
+
+@router.post("/projects/{project_id}/export-kmz")
+async def export_kmz_project(project_id: str, project: Project):
+    """Export the current editor project as a Google Earth KMZ file."""
+    if project.id != project_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project ID does not match the export URL.")
+    content = export_project_kmz(project)
+    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in project.name).strip("-") or "ftth-project"
+    return Response(content=content, media_type="application/vnd.google-earth.kmz", headers={"Content-Disposition": f'attachment; filename="{safe_name}.kmz"'})
 
 
 @router.get("/geocoding/search")
@@ -66,6 +78,31 @@ async def create_project(project: Project, db: Session = Depends(get_db)):
     If the project ID is omitted or empty, a stable UUID is automatically assigned.
     Returns HTTP 201 Created with canonical Project aggregate.
     """
+    repo = ProjectRepository(db)
+    saved = repo.save(project)
+    return saved
+
+
+@router.post("/projects/import-kmz", response_model=Project, status_code=status.HTTP_201_CREATED)
+async def import_kmz_project(
+    file: UploadFile = File(...),
+    name: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Import a Google Earth KMZ or KML file into a complete FTTH project aggregate."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded file is empty.",
+        )
+    try:
+        project = parse_kmz_or_kml_bytes(content, filename=file.filename or "", project_name=name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to parse KMZ/KML file: {str(exc)}",
+        )
     repo = ProjectRepository(db)
     saved = repo.save(project)
     return saved

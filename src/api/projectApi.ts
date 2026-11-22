@@ -11,6 +11,7 @@ export interface ProjectApi {
   calculatePoleSpans(projectId: string): Promise<PoleSpanResult>;
   validateTopology(projectId: string, project?: Project): Promise<TopologyValidationResult>;
   validateConnection(projectId: string, request: ConnectionValidationRequest): Promise<TopologyValidationResult>;
+  importKmz(file: File, name?: string): Promise<Project>;
 }
 export type ProjectSummary = Pick<Project, "id" | "name" | "description" | "currency" | "updatedAt">;
 
@@ -78,6 +79,32 @@ export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
     calculatePoleSpans: (id) => request(`/projects/${encodeURIComponent(id)}/calculations/pole-spans`, { method: "POST" }),
     validateTopology: (id, project) => request(`/projects/${encodeURIComponent(id)}/validate-topology`, { method: "POST", ...(project ? { body: JSON.stringify(project) } : {}) }),
     validateConnection: (id, validation) => request(`/projects/${encodeURIComponent(id)}/validate-connection`, { method: "POST", body: JSON.stringify(validation) }),
+    async importKmz(file: File, name?: string): Promise<Project> {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (name && name.trim()) {
+        formData.append("name", name.trim());
+      }
+      let response: Response;
+      try {
+        response = await fetch(`${normalizedBaseUrl}/projects/import-kmz`, {
+          method: "POST",
+          body: formData,
+        });
+      } catch {
+        throw new ApiError("Could not reach the project server. Check your connection and try again.");
+      }
+      if (!response.ok) {
+        let message = `Import failed (${response.status}).`;
+        try {
+          const body = await response.json();
+          if (typeof body.detail === "string") message = body.detail;
+          else if (typeof body.error?.message === "string") message = body.error.message;
+        } catch { /* response had no JSON body */ }
+        throw new ApiError(message, response.status);
+      }
+      return (await response.json()) as Project;
+    },
   };
 }
 
@@ -97,6 +124,7 @@ export function createMemoryProjectApi(initial?: Project): ProjectApi {
     calculatePoleSpans: unavailable,
     validateTopology: () => Promise.reject(new ApiError("Project topology validation requires the backend; local-session validation cannot apply authoritative FTTH rules.")),
     validateConnection: () => Promise.reject(new ApiError("Topology validation requires the backend; local-session validation cannot apply authoritative FTTH rules.")),
+    importKmz: () => Promise.reject(new ApiError("KMZ/KML import requires the backend server.")),
   };
 }
 
