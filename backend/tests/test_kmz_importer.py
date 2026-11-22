@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from backend.app.main import app
 from backend.app.services.kmz_importer import parse_kmz_or_kml_bytes
 from backend.app.domain.models import NodeType
+from backend.app.services.kmz_exporter import export_project_kmz
 
 SAMPLE_KML = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -85,7 +86,11 @@ def test_parse_kml_bytes():
     assert len(project.cable_segments) == 2
     assert project.cable_segments[0].properties.get("cableCategory") == "feeder"
     assert project.cable_segments[1].properties.get("cableCategory") == "distribution"
-    assert project.cable_segments[0].properties.get("routeStatus") == "verified"
+    assert project.cable_segments[0].properties.get("verificationStatus") == "unverified"
+    assert project.cable_segments[0].properties.get("routeFieldVerificationRequired") is True
+    assert project.cable_segments[0].properties.get("attenuationDbPerKm") is None
+    assert project.cable_segments[0].fiber_count is None
+    assert project.cable_segments[0].cable_type == "Unspecified fiber cable"
 
     # Both cables should snap and form connections
     assert len(project.connections) >= 2
@@ -102,6 +107,19 @@ def test_parse_kmz_bytes():
     assert project.name == "Proyek Klaster Flamboyan"
     assert len(project.nodes) == 5
     assert len(project.cable_segments) == 2
+
+
+def test_ftth_kmz_roundtrip_preserves_entity_ids_connections_and_project_configuration():
+    original = parse_kmz_or_kml_bytes(SAMPLE_KML.encode())
+    original.settings.construction_cost.cable_slack_percent = 17
+    roundtrip = parse_kmz_or_kml_bytes(export_project_kmz(original), filename="roundtrip.kmz")
+
+    assert {node.id for node in roundtrip.nodes} == {node.id for node in original.nodes}
+    assert {customer.id for customer in roundtrip.customers} == {customer.id for customer in original.customers}
+    assert {cable.id for cable in roundtrip.cable_segments} == {cable.id for cable in original.cable_segments}
+    assert {connection.id for connection in roundtrip.connections} == {connection.id for connection in original.connections}
+    assert roundtrip.settings.construction_cost.cable_slack_percent == 17
+    assert all(cable.properties == next(item for item in original.cable_segments if item.id == cable.id).properties for cable in roundtrip.cable_segments)
 
 
 def test_imports_house_named_points_and_residential_polygons_as_customers():
@@ -125,6 +143,31 @@ def test_unclassified_and_bare_number_points_import_as_customers_not_poles():
     project = parse_kmz_or_kml_bytes(kml.encode())
     assert {customer.name for customer in project.customers} == {"The Eiffel Tower", "12"}
     assert [node.name for node in project.nodes if node.type == NodeType.POLE] == ["Tiang T.13"]
+
+
+def test_imports_manholes_and_handholes_as_unverified_physical_infrastructure():
+    kml = b'''<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><name>Manhole MH-01</name><Point><coordinates>119.45,-5.15,0</coordinates></Point></Placemark>
+      <Placemark><name>Handhole HH-02</name><Point><coordinates>119.451,-5.15,0</coordinates></Point></Placemark>
+    </Document></kml>'''
+    project = parse_kmz_or_kml_bytes(kml)
+    physical = {node.type: node for node in project.nodes}
+    assert set(physical) == {NodeType.MANHOLE, NodeType.HANDHOLE}
+    assert all(node.properties["status"] == "unverified" for node in physical.values())
+    assert project.connections == []
+
+
+def test_cable_endpoint_beyond_validation_tolerance_is_not_auto_connected():
+    kml = """<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><name>OLT Main</name><Point><coordinates>119.49,-5.14,0</coordinates></Point></Placemark>
+      <Placemark><name>Rumah 1</name><Point><coordinates>119.491,-5.14,0</coordinates></Point></Placemark>
+      <Placemark><name>JARAK</name><LineString><coordinates>119.49,-5.14,0 119.4905,-5.14,0</coordinates></LineString></Placemark>
+    </Document></kml>"""
+    project = parse_kmz_or_kml_bytes(kml.encode())
+    cable = project.cable_segments[0]
+    assert cable.start_node_id is not None
+    assert cable.end_node_id is None
+    assert project.connections == []
 
 
 def test_api_import_kmz_endpoint(client: TestClient):

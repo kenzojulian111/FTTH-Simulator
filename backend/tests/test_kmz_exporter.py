@@ -25,5 +25,5 @@ def test_export_project_as_kmz_includes_homes_and_network_nodes():
     ns = {"k": "http://www.opengis.net/kml/2.2"}
     placemarks = root.findall(".//k:Placemark", ns)
     names = [mark.findtext("k:name", namespaces=ns) for mark in placemarks]
-    assert names == ["OLT Main", "Rumah 1"]
-    assert len(root.findall(".//k:Point/k:coordinates", ns)) == 2
+    assert names == ["OLT Main", "ONT Home", "Rumah 1"]
+    assert len(root.findall(".//k:Point/k:coordinates", ns)) == 3

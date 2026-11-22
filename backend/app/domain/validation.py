@@ -51,6 +51,8 @@ ALLOWED_OPTICAL_TRANSITIONS: Dict[NodeType, Set[NodeType]] = {
     NodeType.SPLITTER: {NodeType.ODC, NodeType.ODP, NodeType.SPLITTER, NodeType.ONT},
     NodeType.ONT: set(),
     NodeType.POLE: set(),
+    NodeType.MANHOLE: set(),
+    NodeType.HANDHOLE: set(),
     NodeType.ROUTER: set(),
     NodeType.CUSTOMER: set(),
 }
@@ -447,13 +449,15 @@ def validate_connection_candidate(
         return TopologyValidationResult(valid=False, errors=errors, warnings=warnings, summary=summary)
 
     # 3. Device Role & Compatibility Checks
-    if from_node.type == NodeType.POLE or to_node.type == NodeType.POLE:
-        pole_name = from_node.name if from_node.type == NodeType.POLE else to_node.name
+    physical_types = {NodeType.POLE, NodeType.MANHOLE, NodeType.HANDHOLE}
+    if from_node.type in physical_types or to_node.type in physical_types:
+        physical_node = from_node if from_node.type in physical_types else to_node
+        node_label = {NodeType.POLE: "Pole", NodeType.MANHOLE: "Manhole", NodeType.HANDHOLE: "Handhole"}[physical_node.type]
         errors.append(
             TopologyIssue(
-                code="pole_not_optical_device",
+                code="pole_not_optical_device" if physical_node.type == NodeType.POLE else "physical_infrastructure_not_optical_device",
                 policy_code="incompatible-types",
-                message=f"Pole '{pole_name}' is physical support infrastructure and cannot host logical optical connections",
+                message=f"{node_label} '{physical_node.name}' is physical infrastructure and cannot host logical optical connections",
                 severity="error",
                 from_node_id=request.from_node_id,
                 to_node_id=request.to_node_id,
@@ -882,12 +886,15 @@ def validate_project_topology(project: Project) -> TopologyValidationResult:
             )
             continue
 
-        if from_node.type == NodeType.POLE or to_node.type == NodeType.POLE:
+        physical_types = {NodeType.POLE, NodeType.MANHOLE, NodeType.HANDHOLE}
+        if from_node.type in physical_types or to_node.type in physical_types:
+            physical_node = from_node if from_node.type in physical_types else to_node
+            node_label = {NodeType.POLE: "Pole", NodeType.MANHOLE: "Manhole", NodeType.HANDHOLE: "Handhole"}[physical_node.type]
             errors.append(
                 TopologyIssue(
-                    code="pole_not_optical_device",
+                    code="pole_not_optical_device" if physical_node.type == NodeType.POLE else "physical_infrastructure_not_optical_device",
                     policy_code="incompatible-types",
-                    message=f"Pole '{from_node.name if from_node.type == NodeType.POLE else to_node.name}' is physical infrastructure and cannot host logical optical connections",
+                    message=f"{node_label} '{physical_node.name}' is physical infrastructure and cannot host logical optical connections",
                     severity="error",
                     from_node_id=conn.from_node_id,
                     to_node_id=conn.to_node_id,

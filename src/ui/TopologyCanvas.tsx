@@ -4,7 +4,7 @@ import type { Customer, FeatureProperties, FeatureRef, NetworkNode, NodeType, Pr
 
 const WIDTH = 1000;
 const HEIGHT = 700;
-const NODE_TYPES: Exclude<NodeType, "customer">[] = ["olt", "odc", "odp", "ont", "splitter", "pole", "router"];
+const NODE_TYPES: Exclude<NodeType, "customer">[] = ["olt", "odc", "odp", "ont", "splitter", "pole", "manhole", "handhole", "router"];
 export type PaletteDevice = Exclude<NodeType, "customer"> | "customer";
 export type ConnectionEndpoint = { kind: "node" | "customer"; id: string };
 export type CanvasPosition = { x: number; y: number };
@@ -34,11 +34,11 @@ function point(event: ClientPointEvent) {
 }
 
 function symbol(type: string) {
-  return type === "customer" ? "⌂" : type === "pole" ? "P" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase();
+  return type === "customer" ? "⌂" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase();
 }
 
 function title(type: string) {
-  return type === "olt" ? "OLT" : type === "odc" ? "ODC" : type === "odp" ? "ODP" : type === "ont" ? "ONT" : type === "pole" ? "Pole" : type === "customer" ? "Customer" : type === "router" ? "Router" : "Splitter";
+  return type === "olt" ? "OLT" : type === "odc" ? "ODC" : type === "odp" ? "ODP" : type === "ont" ? "ONT" : type === "pole" ? "Pole" : type === "manhole" ? "Manhole" : type === "handhole" ? "Handhole" : type === "customer" ? "Customer" : type === "router" ? "Router" : "Splitter";
 }
 
 interface Props {

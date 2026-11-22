@@ -35,6 +35,8 @@ class NodeType(str, Enum):
     ODP = "odp"
     ONT = "ont"
     POLE = "pole"
+    MANHOLE = "manhole"
+    HANDHOLE = "handhole"
     SPLITTER = "splitter"
     ROUTER = "router"
     CUSTOMER = "customer"

@@ -1,4 +1,4 @@
-export type NodeType = "olt" | "odc" | "odp" | "ont" | "splitter" | "pole" | "router" | "customer";
+export type NodeType = "olt" | "odc" | "odp" | "ont" | "splitter" | "pole" | "manhole" | "handhole" | "router" | "customer";
 export type Coordinate = [longitude: number, latitude: number];
 export type PointGeometry = { type: "Point"; coordinates: Coordinate };
 export type LineGeometry = { type: "LineString"; coordinates: Coordinate[] };
@@ -285,5 +285,5 @@ export interface PoleSpanResult {
 export type FeatureRef = { kind: "node" | "customer" | "cable" | "area"; id: string };
 export type PlacementTool = NodeType | "customer" | "cable";
 
-export const NODE_LABELS: Record<NodeType, string> = { olt: "OLT", odc: "ODC", odp: "ODP", ont: "ONT", splitter: "Splitter", pole: "Pole", router: "Router", customer: "Customer" };
+export const NODE_LABELS: Record<NodeType, string> = { olt: "OLT", odc: "ODC", odp: "ODP", ont: "ONT", splitter: "Splitter", pole: "Pole", manhole: "Manhole", handhole: "Handhole", router: "Router", customer: "Customer" };
 export const FEATURE_LABELS: Record<PlacementTool, string> = { ...NODE_LABELS, customer: "Customer", cable: "Cable route" };

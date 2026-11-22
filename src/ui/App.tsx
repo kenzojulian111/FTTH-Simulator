@@ -31,14 +31,15 @@ import type { CanvasPosition, ConnectionEndpoint, PaletteDevice } from "./Topolo
 import { setLogicalPosition } from "../domain/layout";
 import { ProjectLibrary } from "./ProjectLibrary";
 import { SaveAsDialog } from "./SaveAsDialog";
+import { NewProjectDialog } from "./NewProjectDialog";
 import { ImportKmzDialog } from "./ImportKmzDialog";
 import { createNamedProjectCopy, forgetActiveProjectId, readActiveProjectId, rememberActiveProjectId, restoreActiveProject } from "./projectSession";
 
 const makeId = () => crypto.randomUUID();
 const timestamp = () => new Date().toISOString();
 const LOGICAL_MAP_ORIGIN: Coordinate = [115.22, -8.65];
-const LOGICAL_DEVICE_TYPES: PaletteDevice[] = ["olt", "odc", "odp", "ont", "splitter", "pole", "router", "customer"];
-const MAP_PLACEMENT_TYPES: PlacementTool[] = ["olt", "odc", "odp", "ont", "splitter", "pole", "router", "customer", "cable"];
+const LOGICAL_DEVICE_TYPES: PaletteDevice[] = ["olt", "odc", "odp", "ont", "splitter", "pole", "manhole", "handhole", "router", "customer"];
+const MAP_PLACEMENT_TYPES: PlacementTool[] = ["olt", "odc", "odp", "ont", "splitter", "pole", "manhole", "handhole", "router", "customer", "cable"];
 
 function isNodePlacementTool(tool: PlacementTool): tool is Exclude<NodeType, "customer"> {
   return tool !== "customer" && tool !== "cable";
@@ -86,6 +87,9 @@ export function App() {
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsSaving, setSaveAsSaving] = useState(false);
   const [saveAsError, setSaveAsError] = useState<string | null>(null);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newProjectCreating, setNewProjectCreating] = useState(false);
+  const [newProjectError, setNewProjectError] = useState<string | null>(null);
   const restoreStarted = useRef(false);
   const [connectionDialog, setConnectionDialog] = useState<{ fromNodeId?: string; toNodeId?: string; cableSegmentId?: string } | null>(null);
   const [opticalResult, setOpticalResult] = useState<OpticalBudgetResult | null>(null);
@@ -98,6 +102,7 @@ export function App() {
   const [calculating, setCalculating] = useState<"optical" | "cost" | "poles" | null>(null);
   const [poleSpanResult, setPoleSpanResult] = useState<PoleSpanResult | null>(null);
   const [poleSpanError, setPoleSpanError] = useState<string | null>(null);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline" | "local">(api.mode === "memory" ? "local" : "checking");
   const mountedRef = useRef(true);
   const saveQueue = useMemo(() => new DebouncedSaveQueue<Project, Project>({
     delayMs: 2000,
@@ -142,6 +147,13 @@ export function App() {
     mountedRef.current = true;
     return () => { mountedRef.current = false; saveQueue.cancelPending(); };
   }, [saveQueue]);
+
+  useEffect(() => {
+    if (api.mode === "memory") { setBackendStatus("local"); return; }
+    let active = true;
+    void api.listProjects().then(() => { if (active) setBackendStatus("online"); }).catch(() => { if (active) setBackendStatus("offline"); });
+    return () => { active = false; };
+  }, [api]);
 
   useEffect(() => {
     const candidate = makeAutosaveSnapshot({
@@ -221,7 +233,7 @@ export function App() {
     }
     if (isNodePlacementTool(tool)) {
       const type = tool;
-      const node = { id: makeId(), type, name: `${NODE_LABELS[type]} ${state.project.nodes.filter((x) => x.type === type).length + 1}`, location: { type: "Point" as const, coordinates: point }, properties: { geographicPositionSet: true, ...(type === "pole" ? { status: "unverified" } : {}) }, createdAt: now, updatedAt: now };
+      const node = { id: makeId(), type, name: `${NODE_LABELS[type]} ${state.project.nodes.filter((x) => x.type === type).length + 1}`, location: { type: "Point" as const, coordinates: point }, properties: { geographicPositionSet: true, ...(type === "pole" || type === "manhole" || type === "handhole" ? { status: "unverified", infrastructureKind: type } : {}) }, createdAt: now, updatedAt: now };
       dispatch({ type: "add-node", node });
     }
     setTool(null);
@@ -236,7 +248,7 @@ export function App() {
       return;
     }
     const nodeType: NodeType = type;
-    const node = { id: makeId(), type: nodeType, name: `${NODE_LABELS[nodeType]} ${state.project.nodes.filter((x) => x.type === nodeType).length + 1}`, location: { type: "Point" as const, coordinates: LOGICAL_MAP_ORIGIN }, properties: setLogicalPosition({ geographicPositionSet: false, ...(nodeType === "pole" ? { status: "unverified" } : {}) }, position), createdAt: now, updatedAt: now };
+    const node = { id: makeId(), type: nodeType, name: `${NODE_LABELS[nodeType]} ${state.project.nodes.filter((x) => x.type === nodeType).length + 1}`, location: { type: "Point" as const, coordinates: LOGICAL_MAP_ORIGIN }, properties: setLogicalPosition({ geographicPositionSet: false, ...(nodeType === "pole" || nodeType === "manhole" || nodeType === "handhole" ? { status: "unverified", infrastructureKind: nodeType } : {}) }, position), createdAt: now, updatedAt: now };
     dispatch({ type: "add-node", node });
     setNotice(`${NODE_LABELS[nodeType]} added to logical layout. Place it on the geographic map to set its coordinates.`);
   }
@@ -436,6 +448,31 @@ export function App() {
     finally { setSaveAsSaving(false); }
   }
 
+  async function createProject(name: string) {
+    const trimmedName = name.trim();
+    if (!trimmedName) { setNewProjectError("Enter a project name."); return; }
+    if ((state.dirty || cableDraftSaveBlockReason(cableDrawing)) && !window.confirm("Discard unsaved changes and create a new empty project?")) return;
+    setNewProjectCreating(true); setNewProjectError(null);
+    switchingProjectRef.current = true; setSwitchingProject(true);
+    saveQueue.cancelPending();
+    try {
+      await saveQueue.waitForIdle();
+      const empty = { ...createEmptyProject(), id: makeId(), name: trimmedName, updatedAt: timestamp() };
+      const saved = await api.saveProject(empty);
+      projectEpochRef.current += 1;
+      dispatch({ type: "load", project: saved });
+      setTool(null); setCableDrawing(null); setPreviewPoint(null); setPendingCable(null);
+      setConnectionDialog(null); setReportView(null); setWorkspaceMode("topology");
+      setActiveProjectId(saved.id); if (api.mode === "http") rememberActiveProjectId(window.sessionStorage, saved.id);
+      setSaveStatus("saved"); setSaveError(null); setLastSuccessfulSaveAt(saved.updatedAt);
+      setNewProjectOpen(false); setNotice(api.mode === "memory" ? `Created “${saved.name}” in this session only. Configure the backend for persistent storage and engineering calculations.` : `Created “${saved.name}”.`);
+    } catch (error) {
+      setNewProjectError(error instanceof Error ? error.message : "Could not create this project. Check the backend and try again.");
+    } finally {
+      switchingProjectRef.current = false; setSwitchingProject(false); setNewProjectCreating(false); setAutosaveWake((value) => value + 1);
+    }
+  }
+
   async function calculate(kind: "optical" | "cost" | "poles") {
     if (cableDraftSaveBlockReason(cableDrawing)) {
       setNotice("This cable route is still a draft. Validate and connect it, or cancel it before saving for a calculation.");
@@ -485,8 +522,10 @@ export function App() {
         const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, (id) => api.calculatePoleSpans(id));
         if (outcome && latestEditorStateRef.current.project.id === outcome.project.id && latestEditorStateRef.current.revision === requestedRevision && latestEditorStateRef.current.generation === requestedGeneration) setPoleSpanResult(outcome.result);
       }
+      if (api.mode === "http") setBackendStatus("online");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Calculation failed.";
+      if (api.mode === "http" && /reach|connection|network|fetch/i.test(message)) setBackendStatus("offline");
       if (kind === "optical") setOpticalError(message); else if (kind === "cost") setCostError(message); else setPoleSpanError(message);
       setNotice(message);
     }
@@ -631,7 +670,7 @@ export function App() {
       <div className="project-title"><input aria-label="Project name" value={state.project.name} onChange={(event) => dispatch({ type: "project-name", name: event.target.value })} /><span className="saved-indicator" title={saveError ?? undefined}>{hasCableDraft ? state.dirty ? "Route draft · edits unsaved" : "Route draft · not saved" : saveStatus === "saving" ? "Saving..." : saveStatus === "failed" ? "Save failed" : state.dirty ? "Unsaved changes" : activeProjectId ? "Saved" : "Draft"}</span></div>
       <div className="workspace-tabs" role="tablist" aria-label="Editor mode"><button role="tab" aria-selected={workspaceMode === "topology"} className={workspaceMode === "topology" ? "active" : ""} onClick={() => setWorkspaceMode("topology")}>Logical topology</button><button role="tab" aria-selected={workspaceMode === "geographic"} className={workspaceMode === "geographic" ? "active" : ""} onClick={() => setWorkspaceMode("geographic")}>Geographic map</button></div>
       {cableDrafting && workspaceMode === "topology" && <span className="draw-paused-indicator">Cable drawing paused <button onClick={cancelCableDrawing}>Cancel</button></span>}
-      <div className="top-actions"><span className={`api-status ${api.mode}`}>{api.mode === "memory" ? "LOCAL SESSION" : "API CONFIGURED"}</span>{lastSuccessfulSaveAt && <span className="last-saved-at">Last saved {new Date(lastSuccessfulSaveAt).toLocaleTimeString()}</span>}{saveStatus === "failed" && <span className="save-failed-label" role="status" title={saveError ?? undefined}>Save failed · retry</span>}{hasCableDraft && <span className="save-draft-hint" role="status">Confirm or cancel route to save</span>}<button className="load-button" onClick={() => setImportKmzOpen(true)}>Import KMZ</button><button className="load-button" onClick={() => void exportKmz()} disabled={hasCableDraft}>Export KMZ</button><button className="load-button" onClick={openProjectLibrary}>My Projects</button><button className="load-button" onClick={() => { setSaveAsError(null); setSaveAsOpen(true); }} disabled={hasCableDraft || saving} title={cableDraftBlockReason ?? undefined}>Save As</button><button className="primary-button" onClick={save} disabled={saving || hasCableDraft || calculating !== null} title={cableDraftBlockReason ?? saveError ?? undefined}>{saving ? "Saving..." : hasCableDraft ? "Route incomplete" : saveStatus === "failed" ? "Retry Save" : state.dirty ? "Save changes" : "Save"}<span>↗</span></button></div>
+      <div className="top-actions"><span className={`api-status ${backendStatus === "online" ? "http" : backendStatus}`} role="status" title={backendStatus === "online" ? "Backend API responded successfully." : backendStatus === "offline" ? "Could not reach the backend. Optical Budget and RAB calculations require the API server." : backendStatus === "local" ? "This local-only adapter does not provide engineering calculations." : "Checking backend API…"}>{backendStatus === "online" ? "API ONLINE" : backendStatus === "offline" ? "API OFFLINE" : backendStatus === "local" ? "LOCAL SESSION · NO CALCS" : "CHECKING API…"}</span>{lastSuccessfulSaveAt && <span className="last-saved-at">Last saved {new Date(lastSuccessfulSaveAt).toLocaleTimeString()}</span>}{saveStatus === "failed" && <span className="save-failed-label" role="status" title={saveError ?? undefined}>Save failed · retry</span>}{hasCableDraft && <span className="save-draft-hint" role="status">Confirm or cancel route to save</span>}<button className="primary-button" onClick={() => { setNewProjectError(null); setNewProjectOpen(true); }} disabled={newProjectCreating || saving || calculating !== null} aria-label="Create a new project">+ New project</button><button className="load-button" onClick={() => setImportKmzOpen(true)}>Import KMZ</button><button className="load-button" onClick={() => void exportKmz()} disabled={hasCableDraft}>Export KMZ</button><button className="load-button" onClick={openProjectLibrary}>My Projects</button><button className="load-button" onClick={() => { setSaveAsError(null); setSaveAsOpen(true); }} disabled={hasCableDraft || saving} title={cableDraftBlockReason ?? undefined}>Save As</button><button className="primary-button" onClick={save} disabled={saving || hasCableDraft || calculating !== null} title={cableDraftBlockReason ?? saveError ?? undefined}>{saving ? "Saving..." : hasCableDraft ? "Route incomplete" : saveStatus === "failed" ? "Retry Save" : state.dirty ? "Save changes" : "Save"}<span>↗</span></button></div>
     </header>
     <div className={`workspace ${reportView ? "report-mode" : ""}`}>
       {reportView ? <div className="report-workspace">{reportView === "rab"
@@ -653,8 +692,8 @@ export function App() {
             <div className="draw-actions"><button onClick={undoCablePoint} disabled={!cableDrawing.endNodeId && !cableDrawing.startNodeId}>Undo selection</button><button onClick={() => { setCableDrawing((current) => current ? { ...current, phase: "route", editingCableId: current.editingCableId ?? current.committedCableId, startNodeId: null, startLocation: null, endNodeId: null, endLocation: null } : current); setPreviewPoint(null); }} disabled={cableDrawing.coordinates.length === 0}>Edit route</button><button onClick={validateAndCreateCableConnection} className="accent-button" disabled={!cableDrawing.startNodeId || !cableDrawing.endNodeId}>{failedCableId === (cableDrawing.committedCableId ?? cableDrawing.editingCableId) ? "Retry validation" : "Validate & connect"}</button><button onClick={cancelCableDrawing}>Cancel</button></div>
           </>}
         </div>}
-        {workspaceMode === "topology" ? <div className="tool-list">{LOGICAL_DEVICE_TYPES.map((type) => <button key={type} className="tool-button" draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-ftth-device", type); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addLogicalDevice(type, { x: 460 + ((state.project.nodes.length + state.project.customers.length) % 3) * 30, y: 300 + ((state.project.nodes.length + state.project.customers.length) % 3) * 30 })}><span className={`tool-symbol symbol-${type}`}>{type === "customer" ? "⌂" : type === "pole" ? "P" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase()}</span><span>{FEATURE_LABELS[type]}</span><span className="tool-plus">⠿</span></button>)}</div> : <div className="tool-list">
-          <button className={`tool-button ${areaDrawing ? "active" : ""}`} onClick={() => { setTool(null); setCableDrawing(null); setAreaDrawing(true); setAreaPoints([]); }}>Draw Area</button>{MAP_PLACEMENT_TYPES.map((type) => <button key={type} className={`tool-button ${tool === type ? "active" : ""}`} onClick={() => placeTool(type)}><span className={`tool-symbol symbol-${type}`}>{type === "customer" ? "⌂" : type === "cable" ? "⌁" : type === "pole" ? "P" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase()}</span><span>{FEATURE_LABELS[type]}</span><span className="tool-plus">+</span></button>)}
+        {workspaceMode === "topology" ? <div className="tool-list">{LOGICAL_DEVICE_TYPES.map((type) => <button key={type} className="tool-button" draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-ftth-device", type); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addLogicalDevice(type, { x: 460 + ((state.project.nodes.length + state.project.customers.length) % 3) * 30, y: 300 + ((state.project.nodes.length + state.project.customers.length) % 3) * 30 })}><span className={`tool-symbol symbol-${type}`}>{type === "customer" ? "⌂" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase()}</span><span>{FEATURE_LABELS[type]}</span><span className="tool-plus">⠿</span></button>)}</div> : <div className="tool-list">
+          <button className={`tool-button ${areaDrawing ? "active" : ""}`} onClick={() => { setTool(null); setCableDrawing(null); setAreaDrawing(true); setAreaPoints([]); }}>Draw Area</button>{MAP_PLACEMENT_TYPES.map((type) => <button key={type} className={`tool-button ${tool === type ? "active" : ""}`} onClick={() => placeTool(type)}><span className={`tool-symbol symbol-${type}`}>{type === "customer" ? "⌂" : type === "cable" ? "⌁" : type === "pole" ? "P" : type === "manhole" ? "M" : type === "handhole" ? "H" : type === "splitter" ? "1:8" : type === "router" ? "R" : type.toUpperCase()}</span><span>{FEATURE_LABELS[type]}</span><span className="tool-plus">+</span></button>)}
         </div>}
         {areaDrawing && <div className="draw-card" aria-label="Area drawing controls"><strong>Draw project area</strong><span>{areaPoints.length} vertices</span><div className="draw-actions"><button onClick={() => setAreaPoints((points) => points.slice(0, -1))} disabled={!areaPoints.length}>Undo</button><button className="accent-button" disabled={areaPoints.length < 3} onClick={() => { const ring = [...areaPoints, areaPoints[0]]; const area: ProjectArea = { id: makeId(), name: `Area ${(state.project.areas ?? []).length + 1}`, geometry: { type: "Polygon", coordinates: [ring] }, fillColor: "#22c55e", fillOpacity: 0.2, classification: "service_area" }; const error = validateProjectArea(area); if (error) { setNotice(error); return; } dispatch({ type: "add-area", area }); setAreaDrawing(false); setAreaPoints([]); }}>Finish area</button><button onClick={() => { setAreaDrawing(false); setAreaPoints([]); }}>Cancel</button></div></div>}
         <div className="network-summary"><div className="rail-heading"><span>PROJECT OBJECTS</span><span className="step-number">{state.project.nodes.length + state.project.customers.length + state.project.cableSegments.length}</span></div>
@@ -745,6 +784,7 @@ export function App() {
     {connectionDialog && <ConnectionDialog key={`${connectionDialog.fromNodeId ?? ""}-${connectionDialog.toNodeId ?? ""}-${connectionDialog.cableSegmentId ?? ""}`} project={connectionProject} initialSourceId={connectionDialog.fromNodeId} initialDestinationId={connectionDialog.toNodeId} initialCableId={connectionDialog.cableSegmentId} validateWithBackend={api.validateConnection} onRejected={(cableId) => setFailedCableId((current) => current === cableId ? current : cableId)} onClose={() => { setConnectionDialog(null); setPendingCable(null); }} onConnect={createConnection} />}
     {projectLibraryOpen && <ProjectLibrary projects={projects} loading={projectsLoading} loadingProjectId={loadingProjectId} error={projectsError} sessionOnly={api.mode === "memory"} onRefresh={() => void refreshProjects()} onLoad={(project) => void loadProject(project)} onDelete={(project) => void deleteProject(project)} onClose={() => setProjectLibraryOpen(false)} />}
     {saveAsOpen && <SaveAsDialog initialName={`${state.project.name} copy`} saving={saveAsSaving} error={saveAsError} onSave={(name) => void saveAs(name)} onClose={() => setSaveAsOpen(false)} />}
+    {newProjectOpen && <NewProjectDialog creating={newProjectCreating} error={newProjectError} onCreate={(name) => void createProject(name)} onClose={() => { if (!newProjectCreating) setNewProjectOpen(false); }} />}
     {importKmzOpen && <ImportKmzDialog onImport={importKmz} onSuccess={acceptImportedProject} onClose={() => setImportKmzOpen(false)} />}
   </main>;
 }

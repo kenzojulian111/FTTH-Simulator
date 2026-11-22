@@ -1,6 +1,7 @@
 """Service for importing and converting Google Earth KMZ/KML files into FTTH Projects."""
 
 import io
+import json
 import math
 import os
 import re
@@ -20,6 +21,8 @@ from backend.app.domain.models import (
     Project,
     ProjectArea,
     ProjectSettings,
+    PoleSpan,
+    OpticalComponent,
     TopologyConnection,
     current_utc_timestamp,
 )
@@ -46,6 +49,26 @@ def _parse_coordinates(coord_text: str) -> List[Tuple[float, float]]:
             except ValueError:
                 continue
     return results
+
+
+def _json_extended(properties: Dict[str, Any], name: str, default):
+    raw = properties.get(f"ftth:{name}")
+    if not isinstance(raw, str):
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _roundtrip_properties(placemark: Dict[str, Any]) -> Dict[str, Any]:
+    saved = _json_extended(placemark["properties"], "properties", None)
+    if isinstance(saved, dict):
+        return saved
+    return {
+        key: value for key, value in placemark["properties"].items()
+        if not key.startswith("ftth:")
+    }
 
 
 def _extract_all_placemarks(root: ET.Element) -> List[Dict[str, Any]]:
@@ -87,7 +110,7 @@ def _extract_all_placemarks(root: ET.Element) -> List[Dict[str, Any]]:
         # Geometry search
         points: List[Tuple[float, float]] = []
         linestrings: List[List[Tuple[float, float]]] = []
-        polygons: List[List[Tuple[float, float]]] = []
+        polygons: List[List[List[Tuple[float, float]]]] = []
 
         for sub in element.iter():
             sub_tag = _strip_ns(sub.tag)
@@ -104,13 +127,15 @@ def _extract_all_placemarks(root: ET.Element) -> List[Dict[str, Any]]:
                     if len(pts) >= 2:
                         linestrings.append(pts)
             elif sub_tag == "Polygon":
-                ring = next((e for e in sub.iter() if _strip_ns(e.tag) == "LinearRing"), None)
-                if ring is not None:
+                rings = []
+                for ring in (e for e in sub.iter() if _strip_ns(e.tag) == "LinearRing"):
                     coord_elem = next((e for e in ring if _strip_ns(e.tag) == "coordinates"), None)
                     if coord_elem is not None and coord_elem.text:
                         pts = _parse_coordinates(coord_elem.text)
                         if len(pts) >= 3:
-                            polygons.append(pts)
+                            rings.append(pts)
+                if rings:
+                    polygons.append(rings)
 
         placemarks.append({
             "name": name,
@@ -180,6 +205,22 @@ def parse_kmz_or_kml_bytes(
     )
 
     placemarks = _extract_all_placemarks(root)
+    manifest: Dict[str, Any] = {}
+    for element in root.iter():
+        if _strip_ns(element.tag) == "Document":
+            for child in element.iter():
+                if _strip_ns(child.tag) != "Data" or child.attrib.get("name") != "ftth:manifest":
+                    continue
+                value_element = next((part for part in child if _strip_ns(part.tag) == "value"), None)
+                if value_element is not None and value_element.text:
+                    try:
+                        raw_manifest = json.loads(value_element.text)
+                        if isinstance(raw_manifest, dict):
+                            manifest = raw_manifest
+                    except (TypeError, ValueError):
+                        pass
+                break
+            break
 
     now_iso = current_utc_timestamp()
     proj_id = str(uuid.uuid4())
@@ -189,11 +230,18 @@ def parse_kmz_or_kml_bytes(
     cables: List[CableSegment] = []
     areas: List[ProjectArea] = []
 
-    node_counter = {"olt": 0, "odc": 0, "odp": 0, "pole": 0, "ont": 0}
+    node_counter = {"olt": 0, "odc": 0, "odp": 0, "pole": 0, "manhole": 0, "handhole": 0, "ont": 0}
+    pending_customers: List[Tuple[Dict[str, Any], Tuple[float, float]]] = []
+    roundtrip_connections: List[Dict[str, Any]] = []
+    roundtrip_cable_ids = set()
 
     # Helper function to classify node type from text
     def _classify_node(name: str, desc: str, folder_path: List[str]) -> Tuple[NodeType, str]:
         combined = f"{name} {desc} {' '.join(folder_path)}".lower()
+        if re.search(r"man\s*hole|manhole|access chamber|inspection chamber|bak kontrol utama", combined):
+            return NodeType.MANHOLE, "manhole"
+        if re.search(r"hand\s*hole|handhole|joint box|bak kontrol kecil", combined):
+            return NodeType.HANDHOLE, "handhole"
         if re.search(r"\bolt\b|optical line terminal|central office|sto\b", combined):
             return NodeType.OLT, "olt"
         if re.search(r"\bodc\b|\bfdt\b|optical distribution cabinet", combined):
@@ -214,30 +262,35 @@ def parse_kmz_or_kml_bytes(
         # Only positively identified infrastructure is imported as a network node.
         return NodeType.CUSTOMER, "customer"
 
-    # Helper to classify cable category
-    def _classify_cable(name: str, desc: str, folder_path: List[str], length_m: float) -> Tuple[str, str, int]:
+    # Names may suggest a category, but do not establish physical specification.
+    def _classify_cable(name: str, desc: str, folder_path: List[str], length_m: float = 0) -> Optional[str]:
         combined = f"{name} {desc} {' '.join(folder_path)}".lower()
         if re.search(r"feeder|fdr|\bf-|\b12c\b|\b24c\b|\b48c\b", combined):
-            return "feeder", "Feeder 12-Core G.652.D", 12
+            return "feeder"
         if re.search(r"dist|distribusi|distribution|\bd-|\b8c\b|\b6c\b|\b4c\b", combined):
-            return "distribution", "Distribution 8-Core G.652.D", 8
+            return "distribution"
         if re.search(r"drop|\bdc\b|langganan|\b1c\b|\b2c\b", combined):
-            return "drop", "Drop 1-Core G.657.A1", 1
-        # Fallback by length
-        if length_m > 400.0:
-            return "feeder", "Feeder 12-Core G.652.D", 12
-        if length_m >= 75.0:
-            return "distribution", "Distribution 8-Core G.652.D", 8
-        return "drop", "Drop 1-Core G.657.A1", 1
+            return "drop"
+        return None
 
     # 1. Process Points (Nodes & Customers)
     for pm in placemarks:
         for pt in pm["points"]:
             name = pm["name"] or "Unnamed Node"
             desc = pm["description"]
-            node_type, cat_key = _classify_node(name, desc, pm["folderPath"])
-            node_id = str(uuid.uuid4())
+            entity = pm["properties"].get("ftth:entity")
+            explicit_type = pm["properties"].get("ftth:nodeType")
+            try:
+                node_type = NodeType(explicit_type) if entity == "node" and explicit_type else _classify_node(name, desc, pm["folderPath"])[0]
+            except ValueError:
+                node_type = _classify_node(name, desc, pm["folderPath"])[0]
+            cat_key = node_type.value
+            saved_id = pm["properties"].get("ftth:id") if entity in {"node", "customer"} else None
+            node_id = str(saved_id or uuid.uuid4())
 
+            if entity == "customer":
+                pending_customers.append((pm, pt))
+                continue
             if node_type == NodeType.CUSTOMER:
                 # Create both a Customer and an ONT node
                 cust_idx = len(customers) + 1
@@ -255,8 +308,6 @@ def parse_kmz_or_kml_bytes(
                         "customerId": node_id,
                         "deploymentStatus": "planned",
                         "opticalEquipmentStatus": "configured",
-                        "rxSensitivityDbm": -27.0,
-                        "rxOverloadDbm": -8.0,
                     },
                     created_at=now_iso,
                     updated_at=now_iso,
@@ -283,43 +334,16 @@ def parse_kmz_or_kml_bytes(
             node_counter[cat_key] = node_counter.get(cat_key, 0) + 1
             display_name = name if name != "Unnamed Node" else f"{node_type.value.upper()} {node_counter[cat_key]}"
 
-            props: Dict[str, Any] = {
+            is_roundtrip_node = entity == "node"
+            props: Dict[str, Any] = _roundtrip_properties(pm) if is_roundtrip_node else {
                 "geographicPositionSet": True,
                 "source": "google_earth_kmz",
-                **pm["properties"],
+                **{key: value for key, value in pm["properties"].items() if not key.startswith("ftth:")},
             }
-
-            if node_type == NodeType.OLT:
-                props.update({
-                    "txPowerDbm": 2.5,
-                    "ponPortCapacity": 8,
-                    "activePonPortCount": 1,
-                    "wavelengthNm": 1490,
-                    "technology": "GPON",
-                })
-            elif node_type == NodeType.ODC:
-                props.update({
-                    "feederPortCapacity": 4,
-                    "distributionPortCapacity": 16,
-                    "splitterRatio": "1:8",
-                    "splitterLossDb": 10.38,
-                })
-            elif node_type == NodeType.ODP:
-                props.update({
-                    "portCapacity": 8,
-                    "availablePorts": 8,
-                    "connectedPorts": 0,
-                    "splitterRatio": "1:8",
-                    "splitterLossDb": 10.38,
-                })
-            elif node_type == NodeType.POLE:
-                props.update({
-                    "status": "existing",
-                    "lifecycleStatus": "existing",
-                    "verificationStatus": "field_verified",
-                    "fieldVerificationRequired": False,
-                    "poleType": "concrete_7m",
-                })
+            if not is_roundtrip_node:
+                props["geographicPositionSet"] = True
+                if node_type in {NodeType.POLE, NodeType.MANHOLE, NodeType.HANDHOLE}:
+                    props.update({"status": "unverified", "infrastructureKind": node_type.value})
 
             node = NetworkNode(
                 id=node_id,
@@ -327,10 +351,38 @@ def parse_kmz_or_kml_bytes(
                 name=display_name,
                 location=PointGeometry(coordinates=pt),
                 properties=props,
-                created_at=now_iso,
-                updated_at=now_iso,
+                created_at=str(pm["properties"].get("ftth:createdAt") or now_iso),
+                updated_at=str(pm["properties"].get("ftth:updatedAt") or now_iso),
             )
             nodes.append(node)
+
+    # Restore FTTH customer records after nodes are loaded so their existing
+    # ONT references survive round-trip KMZ import without creating duplicates.
+    for pm, point in pending_customers:
+        metadata = pm["properties"]
+        customer_id = str(metadata.get("ftth:id") or uuid.uuid4())
+        ont_node_id = metadata.get("ftth:ontNodeId") or None
+        if ont_node_id and not any(node.id == ont_node_id for node in nodes):
+            nodes.append(NetworkNode(
+                id=str(ont_node_id), type=NodeType.ONT, name=f"ONT - {pm['name'] or 'Customer'}",
+                location=PointGeometry(coordinates=point),
+                properties={"geographicPositionSet": True, "source": "google_earth_kmz", "status": "unverified"},
+                created_at=now_iso, updated_at=now_iso,
+            ))
+        try:
+            customer_status = CustomerStatus(metadata.get("ftth:status", "planned"))
+        except ValueError:
+            customer_status = CustomerStatus.PLANNED
+        customer_properties = _roundtrip_properties(pm) if metadata.get("ftth:entity") == "customer" else {
+            "geographicPositionSet": True, "source": "google_earth_kmz",
+        }
+        customers.append(Customer(
+            id=customer_id, name=pm["name"] or f"Customer {len(customers) + 1}", address=pm["description"],
+            location=PointGeometry(coordinates=point), status=customer_status, ont_node_id=ont_node_id,
+            properties=customer_properties,
+            created_at=str(metadata.get("ftth:createdAt") or now_iso),
+            updated_at=str(metadata.get("ftth:updatedAt") or now_iso),
+        ))
 
     # 2. Process LineStrings (Cables)
     cable_counter = 0
@@ -339,53 +391,73 @@ def parse_kmz_or_kml_bytes(
             cable_counter += 1
             length_m = calculate_route_length(line_coords)
             name = pm["name"] or f"Cable {cable_counter}"
-            category, cable_type, fiber_count = _classify_cable(name, pm["description"], pm["folderPath"], length_m)
+            metadata = pm["properties"]
+            is_roundtrip_cable = metadata.get("ftth:entity") == "cable"
+            category = _classify_cable(name, pm["description"], pm["folderPath"])
+            cable_id = str(metadata.get("ftth:id") or uuid.uuid4()) if is_roundtrip_cable else str(uuid.uuid4())
+            cable_properties = _roundtrip_properties(pm) if is_roundtrip_cable else {
+                "source": "google_earth_kmz", "verificationStatus": "unverified",
+                "routeFieldVerificationRequired": True,
+                "cableCategorySource": "import_inference" if category else "unknown",
+                **{key: value for key, value in metadata.items() if not key.startswith("ftth:")},
+            }
+            if is_roundtrip_cable:
+                category = cable_properties.get("cableCategory")
+            if category:
+                cable_properties["cableCategory"] = category
+            if is_roundtrip_cable:
+                roundtrip_cable_ids.add(cable_id)
+                raw_connections = _json_extended(metadata, "connections", [])
+                if isinstance(raw_connections, list):
+                    roundtrip_connections.extend(item for item in raw_connections if isinstance(item, dict))
+            try:
+                fiber_count = int(metadata["ftth:fiberCount"]) if is_roundtrip_cable and metadata.get("ftth:fiberCount") not in (None, "", "null") else None
+            except (TypeError, ValueError):
+                fiber_count = None
 
             cable = CableSegment(
-                id=str(uuid.uuid4()),
+                id=cable_id,
                 name=name,
-                cable_type=cable_type,
+                cable_type=str(metadata.get("ftth:cableType") or "Unspecified fiber cable") if is_roundtrip_cable else "Unspecified fiber cable",
                 fiber_count=fiber_count,
-                deployment_method="aerial",
+                deployment_method=str(metadata.get("ftth:deploymentMethod") or "unspecified") if is_roundtrip_cable else "unspecified",
                 geometry=LineGeometry(coordinates=line_coords),
                 length_m=round(length_m, 2),
-                medium="fiber",
-                connection_type="optical",
-                properties={
-                    "cableCategory": category,
-                    "routeStatus": "verified",
-                    "routeVerified": True,
-                    "routeFieldVerificationRequired": False,
-                    "routeSource": "field_verified",
-                    "routeNote": "Imported from field Google Earth KMZ survey.",
-                    "verificationStatus": "field_verified",
-                    "attenuationDbPerKm": 0.35,
-                    "source": "google_earth_kmz",
-                    **pm["properties"],
-                },
-                created_at=now_iso,
-                updated_at=now_iso,
+                medium=str(metadata.get("ftth:medium") or "fiber") if is_roundtrip_cable else "fiber",
+                connection_type=str(metadata.get("ftth:connectionType") or "optical") if is_roundtrip_cable else "optical",
+                start_node_id=metadata.get("ftth:startNodeId") if is_roundtrip_cable else None,
+                end_node_id=metadata.get("ftth:endNodeId") if is_roundtrip_cable else None,
+                properties=cable_properties,
+                created_at=str(metadata.get("ftth:createdAt") or now_iso),
+                updated_at=str(metadata.get("ftth:updatedAt") or now_iso),
             )
             cables.append(cable)
 
     # 3. Process Polygons (Areas)
     area_counter = 0
     for pm in placemarks:
-        for poly_coords in pm["polygons"]:
-            ring = list(poly_coords)
-            if ring[0] != ring[-1]:
-                ring.append(ring[0])
-            if len(ring) < 4:
+        for poly_rings in pm["polygons"]:
+            rings = []
+            for source_ring in poly_rings:
+                ring = list(source_ring)
+                if ring and ring[0] != ring[-1]:
+                    ring.append(ring[0])
+                if len(ring) >= 4:
+                    rings.append(ring)
+            if not rings:
                 continue
             area_counter += 1
             area_name = pm["name"] or f"Survey Area {area_counter}"
+            area_metadata = pm["properties"]
+            area_id = str(area_metadata.get("ftth:id") or uuid.uuid4()) if area_metadata.get("ftth:entity") == "area" else str(uuid.uuid4())
             area = ProjectArea(
-                id=str(uuid.uuid4()),
+                id=area_id,
                 name=area_name,
-                classification="project_boundary",
-                geometry={"type": "Polygon", "coordinates": [ring]},
-                fill_color="#22c55e",
-                fill_opacity=0.2,
+                classification=area_metadata.get("ftth:classification") or "project_boundary",
+                geometry={"type": "Polygon", "coordinates": rings},
+                fill_color=area_metadata.get("ftth:fillColor") or "#22c55e",
+                fill_opacity=float(area_metadata.get("ftth:fillOpacity", 0.2)),
+                border_color=area_metadata.get("ftth:borderColor"),
                 description=pm["description"] or "",
             )
             areas.append(area)
@@ -395,7 +467,8 @@ def parse_kmz_or_kml_bytes(
             # its centroid when its name, description, or folder identifies it
             # as a home/residential building.
             poly_type, _ = _classify_node(pm["name"], pm["description"], pm["folderPath"])
-            if poly_type == NodeType.CUSTOMER:
+            if area_metadata.get("ftth:entity") != "area" and poly_type == NodeType.CUSTOMER:
+                ring = rings[0]
                 vertices = ring[:-1] if ring[0] == ring[-1] else ring
                 if vertices:
                     lon = sum(point[0] for point in vertices) / len(vertices)
@@ -413,8 +486,6 @@ def parse_kmz_or_kml_bytes(
                             "customerId": customer_id,
                             "deploymentStatus": "planned",
                             "opticalEquipmentStatus": "configured",
-                            "rxSensitivityDbm": -27.0,
-                            "rxOverloadDbm": -8.0,
                             "source": "google_earth_kmz",
                         },
                         created_at=now_iso,
@@ -434,11 +505,16 @@ def parse_kmz_or_kml_bytes(
 
     # 4. Auto-snapping cable endpoints to nearest nodes and creating TopologyConnections
     connections: List[TopologyConnection] = []
-    SNAP_TOLERANCE_METERS = 75.0
+    # Keep auto-snapping within the same endpoint tolerance enforced by
+    # validate_project_integrity; otherwise a 50–75 m snap creates a project
+    # that is rejected immediately after import.
+    SNAP_TOLERANCE_METERS = 50.0
 
     nodes_by_id = {n.id: n for n in nodes}
 
     for cable in cables:
+        if cable.id in roundtrip_cable_ids:
+            continue
         start_pt = cable.geometry.coordinates[0]
         end_pt = cable.geometry.coordinates[-1]
 
@@ -448,7 +524,10 @@ def parse_kmz_or_kml_bytes(
         best_end_node: Optional[NetworkNode] = None
         best_end_dist = float("inf")
 
+        optical_node_types = {NodeType.OLT, NodeType.ODC, NodeType.ODP, NodeType.ONT, NodeType.SPLITTER}
         for node in nodes:
+            if node.type not in optical_node_types:
+                continue
             d_start = distance_meters(start_pt, node.location.coordinates)
             d_end = distance_meters(end_pt, node.location.coordinates)
 
@@ -470,7 +549,7 @@ def parse_kmz_or_kml_bytes(
             n_end = nodes_by_id[cable.end_node_id]
 
             # Determine hierarchical direction (OLT -> ODC -> ODP -> ONT)
-            type_hierarchy = {NodeType.OLT: 1, NodeType.ODC: 2, NodeType.ODP: 3, NodeType.ONT: 4, NodeType.POLE: 5}
+            type_hierarchy = {NodeType.OLT: 1, NodeType.ODC: 2, NodeType.ODP: 3, NodeType.ONT: 4, NodeType.SPLITTER: 3}
             h_start = type_hierarchy.get(n_start.type, 99)
             h_end = type_hierarchy.get(n_end.type, 99)
 
@@ -495,20 +574,45 @@ def parse_kmz_or_kml_bytes(
     # 5. Splitter attributes are configured directly on ODC and ODP nodes
     # (Integrated enclosure splitters as supported by the optical and cost engines)
 
-    # 6. Default Project Settings
-    settings = ProjectSettings()
+    # Restore FTTH project configuration where present. Third-party KML remains
+    # deliberately incomplete instead of receiving fabricated design inputs.
+    raw_settings = manifest.get("settings") if isinstance(manifest, dict) else None
+    try:
+        settings = ProjectSettings.model_validate(raw_settings) if isinstance(raw_settings, dict) else ProjectSettings()
+    except Exception:
+        settings = ProjectSettings()
+    pole_spans = []
+    for item in manifest.get("poleSpans", []) if isinstance(manifest, dict) else []:
+        try:
+            pole_spans.append(PoleSpan.model_validate(item))
+        except Exception:
+            continue
+    optical_components = []
+    for item in manifest.get("opticalComponents", []) if isinstance(manifest, dict) else []:
+        try:
+            optical_components.append(OpticalComponent.model_validate(item))
+        except Exception:
+            continue
+    cable_ids = {cable.id for cable in cables}
+    for item in roundtrip_connections:
+        try:
+            connection = TopologyConnection.model_validate(item)
+            if connection.cable_segment_id in roundtrip_cable_ids and connection.cable_segment_id in cable_ids:
+                connections.append(connection)
+        except Exception:
+            continue
 
     return Project(
         id=proj_id,
         name=final_project_name,
-        description=f"Auto-imported from Google Earth KMZ ({len(nodes)} nodes, {len(cables)} cable segments, {len(customers)} customers).",
-        currency="IDR",
+        description=str(manifest.get("description") or f"Auto-imported from Google Earth KMZ ({len(nodes)} nodes, {len(cables)} cable segments, {len(customers)} customers)."),
+        currency=str(manifest.get("currency") or "IDR"),
         nodes=nodes,
         customers=customers,
         cable_segments=cables,
         connections=connections,
-        pole_spans=[],
-        optical_components=[],
+        pole_spans=pole_spans,
+        optical_components=optical_components,
         areas=areas,
         settings=settings,
         created_at=now_iso,

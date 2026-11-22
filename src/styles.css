@@ -3249,3 +3249,4 @@ summary:focus-visible {
 
 
 .project-library-row-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}.project-library-row .project-delete-button{border-color:#744340;color:#f0aaa2}.project-library-row .project-delete-button:hover:not(:disabled){border-color:#d17368;background:#3a2325;color:#ffd1ca}
+.pin-manhole{background:#495665;color:#e4eaf0;border-radius:5px}.pin-handhole{background:#684d32;color:#ffe0ad;border-radius:5px}.symbol-manhole{background:#293642;color:#d1dbe4}.symbol-handhole{background:#443322;color:#f4c88e}
