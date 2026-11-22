@@ -14,9 +14,9 @@ describe("ImportKmzDialog backend guidance", () => {
     root = null; host?.remove(); host = null;
   });
 
-  it("shows actionable FastAPI steps and disables repeat import after a Rust 405", async () => {
+  it("shows the integrated stack command and disables repeat import if FastAPI is offline", async () => {
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-    const onImport = vi.fn(async () => { throw new Error("This Rust backend does not provide KMZ/KML import."); });
+    const onImport = vi.fn(async () => { throw new Error("Could not reach the KMZ parser (FastAPI). Start the integrated stack with npm run dev:stack."); });
     act(() => root?.render(<ImportKmzDialog onImport={onImport} onSuccess={() => undefined} onClose={() => undefined} />));
 
     const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -27,9 +27,9 @@ describe("ImportKmzDialog backend guidance", () => {
     const submit = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.includes("Import & Open Project"))!;
     await act(async () => { submit.click(); });
 
-    expect(host.textContent).toContain("Stop Rust with Ctrl+C");
-    expect(host.textContent).toContain("python -m uvicorn backend.app.main:app");
-    const disabledButton = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.includes("Switch to FastAPI to import"));
+    expect(host.textContent).toContain("FastAPI KMZ service is not responding");
+    expect(host.textContent).toContain("npm run dev:stack");
+    const disabledButton = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.includes("Start the integrated backend stack"));
     expect(disabledButton?.disabled).toBe(true);
     expect(onImport).toHaveBeenCalledTimes(1);
   });

@@ -171,10 +171,19 @@ describe("HTTP project API adapter", () => {
     expect(form.getAll("files")).toHaveLength(2);
   });
 
-  it("explains that KMZ import needs FastAPI when the Rust server returns 405", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 405, json: async () => ({}) }));
-    await expect(createHttpProjectApi("http://localhost:8000/api/v1").importKmz([new File(["kml"], "survey.kmz")]))
-      .rejects.toThrow("This Rust backend does not provide KMZ/KML import");
+  it("parses KMZ through FastAPI then persists the imported project through Rust", async () => {
+    const parsed = createEmptyProject("Survey import");
+    const saved = { ...parsed, updatedAt: "2026-11-23T00:00:00Z" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => parsed })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => saved });
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createHttpProjectApi("http://localhost:8000/api/v1", "http://localhost:8001/api/v1");
+
+    await expect(api.importKmz([new File(["kml"], "survey.kmz")], "Survey import")).resolves.toEqual(saved);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8001/api/v1/integrations/kmz/import");
+    expect(fetchMock.mock.calls[1][0]).toBe(`http://localhost:8000/api/v1/projects/${parsed.id}`);
+    expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
   });
 
   it("persists the project before calculating with the canonical saved ID", async () => {

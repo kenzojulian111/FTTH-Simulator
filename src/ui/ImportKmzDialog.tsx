@@ -47,7 +47,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to import KMZ file. Check the server connection.";
       setError(message);
-      if (message.includes("This Rust backend does not provide KMZ/KML import")) setBackendUnsupported(true);
+      if (message.includes("Could not reach the KMZ parser (FastAPI)")) setBackendUnsupported(true);
     } finally {
       setLoading(false);
     }
@@ -113,7 +113,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
 
           <div className="kmz-feature-features-box">
             <h4>Automatic Capabilities:</h4>
-            {!backendUnsupported && <p role="note" className="kmz-backend-note">KMZ/KML import and export require the Python FastAPI backend. Rust supports the optical and RAB APIs, but not KMZ endpoints.</p>}
+            {!backendUnsupported && <p role="note" className="kmz-backend-note">KMZ parsing runs in FastAPI; projects, optical calculations, and RAB stay on the Rust API. Start both together with <code>npm run dev:stack</code>.</p>}
             <ul>
               <li><strong>Multi-file import:</strong> Select multiple KMZ/KML files at once and combine them into one project.</li>
               <li><strong>Placemark Recognition:</strong> Recognizes OLT, ODC, ODP, poles, manholes, handholes, ONTs, and customer locations from names and folders.</li>
@@ -124,10 +124,10 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
 
           {error && (
             backendUnsupported ? <div className="kmz-backend-error" role="alert">
-              <strong>KMZ import is unavailable on the Rust server.</strong>
-              <span>Stop Rust with Ctrl+C in its running terminal, then start FastAPI in that terminal:</span>
-              <code>source .venv/bin/activate<br />python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000</code>
-              <span>Keep <code>npm run dev</code> running in the other terminal, then close and reopen this dialog.</span>
+              <strong>KMZ parser is unavailable.</strong>
+              <span>The FastAPI KMZ service is not responding. In the project directory, start the integrated development stack:</span>
+              <code>npm run dev:stack</code>
+              <span>This starts Rust on port 8000, FastAPI on port 8001, and Vite. Existing Rust projects remain the source of truth.</span>
             </div> : <div className="project-library-error" role="alert" style={{ marginTop: "12px" }}>{error}</div>
           )}
         </div>
@@ -142,7 +142,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
             onClick={handleSubmit}
             disabled={!selectedFiles.length || loading || backendUnsupported}
           >
-            {loading ? "Importing & Converting…" : backendUnsupported ? "Switch to FastAPI to import" : "Import & Open Project"}
+            {loading ? "Importing & Saving…" : backendUnsupported ? "Start the integrated backend stack" : "Import & Open Project"}
           </button>
         </footer>
       </section>

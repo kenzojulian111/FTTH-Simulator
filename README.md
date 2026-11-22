@@ -505,3 +505,11 @@ Contributions to the FTTH Network Planning Simulator are welcome. To contribute:
 
 ### License
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for the complete license terms.
+# Run the integrated development stack
+
+Use `npm run dev:stack` from the project root to start the Rust API (port 8000),
+the FastAPI KMZ parser (port 8001), and Vite together. The frontend sends project
+storage and engineering calculations to Rust. FastAPI parses KMZ/KML without
+persisting it; the imported project is then saved to Rust's Redb store. Stop the
+stack with Ctrl+C. This command expects the project virtual environment at
+`.venv/bin/python` and Rust/Cargo to be installed.

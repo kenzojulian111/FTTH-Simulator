@@ -47,8 +47,9 @@ function parseProjectSummaryList(value: unknown): ProjectSummary[] {
   return value.projects;
 }
 
-export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
+export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi/api/v1"): ProjectApi {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const normalizedKmzBaseUrl = kmzBaseUrl.replace(/\/+$/, "");
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response;
     try { response = await fetch(`${normalizedBaseUrl}${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }); }
@@ -87,23 +88,20 @@ export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
       }
       let response: Response;
       try {
-        response = await fetch(`${normalizedBaseUrl}/projects/import-kmz`, {
+        response = await fetch(`${normalizedKmzBaseUrl}/integrations/kmz/import`, {
           method: "POST",
           body: formData,
         });
       } catch {
-        throw new ApiError("Could not reach the project server. Check your connection and try again.");
+        throw new ApiError("Could not reach the KMZ parser (FastAPI). Start the integrated stack with npm run dev:stack.");
       }
       if (!response.ok) {
         let message = `Import failed (${response.status}).`;
         let details: string[] = [];
-        if (response.status === 405) {
-          message = "This Rust backend does not provide KMZ/KML import. Stop it and start the FastAPI backend with: source .venv/bin/activate && python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000, then retry.";
-        }
         try {
           const body = await response.json();
-          if (response.status !== 405 && typeof body.detail === "string") message = body.detail;
-          else if (response.status !== 405 && typeof body.error?.message === "string") message = body.error.message;
+          if (typeof body.detail === "string") message = body.detail;
+          else if (typeof body.error?.message === "string") message = body.error.message;
           if (Array.isArray(body.error?.details)) {
             details = body.error.details.map((detail: { field?: string; message?: string }) =>
               `${detail.field ? `${detail.field}: ` : ""}${detail.message ?? "Invalid project data"}`,
@@ -112,7 +110,13 @@ export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
         } catch { /* response had no JSON body */ }
         throw new ApiError(details.length ? `${message} ${details.join("; ")}` : message, response.status, details);
       }
-      return (await response.json()) as Project;
+      const parsedProject = (await response.json()) as Project;
+      // FastAPI only parses the files. The project is persisted by the primary Rust API,
+      // keeping all projects and calculations in the same Redb database.
+      return request<Project>(`/projects/${encodeURIComponent(parsedProject.id)}`, {
+        method: "PUT",
+        body: JSON.stringify(parsedProject),
+      });
     },
   };
 }
@@ -139,5 +143,6 @@ export function createMemoryProjectApi(initial?: Project): ProjectApi {
 
 export function createProjectApi(): ProjectApi {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
-  return createHttpProjectApi(baseUrl);
+  const kmzBaseUrl = import.meta.env.VITE_KMZ_API_BASE_URL || "/fastapi/api/v1";
+  return createHttpProjectApi(baseUrl, kmzBaseUrl);
 }

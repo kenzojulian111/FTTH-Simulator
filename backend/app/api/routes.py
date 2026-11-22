@@ -134,6 +134,49 @@ async def import_kmz_project(
     return saved
 
 
+@router.post("/integrations/kmz/import", response_model=Project)
+async def parse_kmz_for_external_persistence(
+    files: List[UploadFile] = File(default=[]),
+    file: Optional[UploadFile] = File(None),
+    name: Optional[str] = Form(None),
+):
+    """Parse KMZ/KML without saving it, for deployments whose primary store is Rust/Redb."""
+    uploads = files or ([file] if file is not None else [])
+    if not uploads:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one KMZ or KML file.")
+
+    imported: List[Project] = []
+    for upload in uploads:
+        content = await upload.read()
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"The uploaded file '{upload.filename or 'unnamed'}' is empty.",
+            )
+        try:
+            imported.append(parse_kmz_or_kml_bytes(content, filename=upload.filename or ""))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to parse '{upload.filename or 'unnamed'}': {str(exc)}",
+            ) from exc
+
+    first = imported[0]
+    return Project(
+        name=(name.strip() if name and name.strip() else first.name if len(imported) == 1 else f"{first.name} + {len(imported) - 1} file(s)"),
+        description=first.description,
+        currency=first.currency,
+        nodes=[item for source in imported for item in source.nodes],
+        customers=[item for source in imported for item in source.customers],
+        cable_segments=[item for source in imported for item in source.cable_segments],
+        connections=[item for source in imported for item in source.connections],
+        pole_spans=[item for source in imported for item in source.pole_spans],
+        optical_components=[item for source in imported for item in source.optical_components],
+        areas=[item for source in imported for item in source.areas],
+        settings=first.settings,
+    )
+
+
 @router.get("/projects/{project_id}", response_model=Project)
 async def get_project(project_id: str, db: Session = Depends(get_db)):
     """Retrieve a project aggregate by ID."""

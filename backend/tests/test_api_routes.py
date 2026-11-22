@@ -15,6 +15,20 @@ def test_health_check_endpoints(client: TestClient):
     assert res_api.json()["status"] == "ok"
 
 
+def test_kmz_integration_parser_does_not_persist_into_fastapi_database(client: TestClient):
+    kml = b'''<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><name>OLT Central</name><Point><coordinates>119.45,-5.15,0</coordinates></Point></Placemark>
+    </Document></kml>'''
+    response = client.post(
+        "/api/v1/integrations/kmz/import",
+        files={"files": ("survey.kml", kml, "application/vnd.google-earth.kml+xml")},
+        data={"name": "Parsed only"},
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "Parsed only"
+    assert client.get("/api/v1/projects").json() == {"projects": []}
+
+
 def test_docs_and_spa_frontend_serving(client: TestClient):
     """Verify /docs, root SPA index.html, SPA client-route fallback, and /api/v1 404 isolation."""
     res_docs = client.get("/docs")
