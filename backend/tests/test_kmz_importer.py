@@ -104,6 +104,29 @@ def test_parse_kmz_bytes():
     assert len(project.cable_segments) == 2
 
 
+def test_imports_house_named_points_and_residential_polygons_as_customers():
+    kml = """<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Folder><name>Homes</name><Placemark><name>House 01</name><Point><coordinates>119.45,-5.15,0</coordinates></Point></Placemark></Folder>
+      <Placemark><name>Rumah 02</name><Polygon><outerBoundaryIs><LinearRing><coordinates>
+        119.46,-5.16,0 119.461,-5.16,0 119.461,-5.161,0 119.46,-5.161,0 119.46,-5.16,0
+      </coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>
+    </Document></kml>"""
+    project = parse_kmz_or_kml_bytes(kml.encode())
+    assert {customer.name for customer in project.customers} == {"House 01", "Rumah 02"}
+    assert len(project.areas) == 1
+
+
+def test_unclassified_and_bare_number_points_import_as_customers_not_poles():
+    kml = """<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><name>The Eiffel Tower</name><Point><coordinates>2.2945,48.8584,0</coordinates></Point></Placemark>
+      <Placemark><name>12</name><Point><coordinates>119.45,-5.15,0</coordinates></Point></Placemark>
+      <Placemark><name>Tiang T.13</name><Point><coordinates>119.46,-5.16,0</coordinates></Point></Placemark>
+    </Document></kml>"""
+    project = parse_kmz_or_kml_bytes(kml.encode())
+    assert {customer.name for customer in project.customers} == {"The Eiffel Tower", "12"}
+    assert [node.name for node in project.nodes if node.type == NodeType.POLE] == ["Tiang T.13"]
+
+
 def test_api_import_kmz_endpoint(client: TestClient):
     """Verify POST /api/v1/projects/import-kmz endpoint."""
     bio = io.BytesIO()
@@ -125,3 +148,21 @@ def test_api_import_kmz_endpoint(client: TestClient):
     proj_id = data["id"]
     del_resp = client.delete(f"/api/v1/projects/{proj_id}")
     assert del_resp.status_code == 204
+
+
+def test_api_import_multiple_kmz_files_combines_projects(client: TestClient):
+    response = client.post(
+        "/api/v1/projects/import-kmz",
+        files=[
+            ("files", ("survey-a.kml", SAMPLE_KML.encode(), "application/vnd.google-earth.kml+xml")),
+            ("files", ("survey-b.kml", SAMPLE_KML.encode(), "application/vnd.google-earth.kml+xml")),
+        ],
+        data={"name": "Combined Survey"},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Combined Survey"
+    assert len(data["customers"]) == 2
+    assert len(data["nodes"]) == 10
+    assert len(data["cableSegments"]) == 4
+    assert client.delete(f"/api/v1/projects/{data['id']}").status_code == 204

@@ -341,7 +341,7 @@ export function App() {
     finally { setProjectsLoading(false); }
   }
 
-  async function importKmz(file: File, name?: string) { return api.importKmz(file, name); }
+  async function importKmz(files: File[], name?: string) { return api.importKmz(files, name); }
   function acceptImportedProject(project: Project) {
     projectEpochRef.current += 1;
     dispatch({ type: "load", project }); setTool(null); setCableDrawing(null); setPreviewPoint(null);
@@ -390,6 +390,27 @@ export function App() {
       if (notFound) await refreshProjects();
       setProjectsError(message);
     } finally { switchingProjectRef.current = false; setSwitchingProject(false); setLoadingProjectId(null); setAutosaveWake((value) => value + 1); }
+  }
+
+  async function deleteProject(summary: ProjectSummary) {
+    const deletingActiveProject = summary.id === activeProjectId;
+    const unsavedWarning = deletingActiveProject && state.dirty ? " It also discards the unsaved changes in the editor." : "";
+    if (!window.confirm(`Permanently delete “${summary.name}”?${unsavedWarning}`)) return;
+    setLoadingProjectId(summary.id); setProjectsError(null);
+    try {
+      await api.deleteProject(summary.id);
+      if (deletingActiveProject) {
+        projectEpochRef.current += 1;
+        dispatch({ type: "load", project: createEmptyProject() });
+        setActiveProjectId(null);
+        if (api.mode === "http") forgetActiveProjectId(window.sessionStorage);
+        setSaveStatus("idle"); setSaveError(null); setLastSuccessfulSaveAt(null);
+      }
+      setNotice(`Deleted “${summary.name}”.`);
+      await refreshProjects();
+    } catch (error) {
+      setProjectsError(error instanceof Error ? error.message : "Project could not be deleted.");
+    } finally { setLoadingProjectId(null); }
   }
 
   async function saveAs(name: string) {
@@ -722,7 +743,7 @@ export function App() {
     </div>
     <footer className="statusbar"><span><i className="status-dot" /> EDITOR READY</span><span>FTTH PLANNER <b>·</b> MILESTONE 01</span></footer>
     {connectionDialog && <ConnectionDialog key={`${connectionDialog.fromNodeId ?? ""}-${connectionDialog.toNodeId ?? ""}-${connectionDialog.cableSegmentId ?? ""}`} project={connectionProject} initialSourceId={connectionDialog.fromNodeId} initialDestinationId={connectionDialog.toNodeId} initialCableId={connectionDialog.cableSegmentId} validateWithBackend={api.validateConnection} onRejected={(cableId) => setFailedCableId((current) => current === cableId ? current : cableId)} onClose={() => { setConnectionDialog(null); setPendingCable(null); }} onConnect={createConnection} />}
-    {projectLibraryOpen && <ProjectLibrary projects={projects} loading={projectsLoading} loadingProjectId={loadingProjectId} error={projectsError} sessionOnly={api.mode === "memory"} onRefresh={() => void refreshProjects()} onLoad={(project) => void loadProject(project)} onClose={() => setProjectLibraryOpen(false)} />}
+    {projectLibraryOpen && <ProjectLibrary projects={projects} loading={projectsLoading} loadingProjectId={loadingProjectId} error={projectsError} sessionOnly={api.mode === "memory"} onRefresh={() => void refreshProjects()} onLoad={(project) => void loadProject(project)} onDelete={(project) => void deleteProject(project)} onClose={() => setProjectLibraryOpen(false)} />}
     {saveAsOpen && <SaveAsDialog initialName={`${state.project.name} copy`} saving={saveAsSaving} error={saveAsError} onSave={(name) => void saveAs(name)} onClose={() => setSaveAsOpen(false)} />}
     {importKmzOpen && <ImportKmzDialog onImport={importKmz} onSuccess={acceptImportedProject} onClose={() => setImportKmzOpen(false)} />}
   </main>;

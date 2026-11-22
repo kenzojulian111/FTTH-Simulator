@@ -8,11 +8,12 @@ interface ProjectLibraryProps {
   sessionOnly: boolean;
   onRefresh: () => void;
   onLoad: (project: ProjectSummary) => void;
+  onDelete?: (project: ProjectSummary) => void;
   onOpenImportKmz?: () => void;
   onClose: () => void;
 }
 
-export function ProjectLibrary({ projects, loading, loadingProjectId, error, sessionOnly, onRefresh, onLoad, onOpenImportKmz, onClose }: ProjectLibraryProps) {
+export function ProjectLibrary({ projects, loading, loadingProjectId, error, sessionOnly, onRefresh, onLoad, onDelete, onOpenImportKmz, onClose }: ProjectLibraryProps) {
   return <div className="project-library-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="project-library" role="dialog" aria-modal="true" aria-labelledby="project-library-title">
       <header><div><p className="project-library-kicker">WORKSPACE</p><h2 id="project-library-title">My Projects</h2><p className="project-library-subtitle">{sessionOnly ? "Session-only projects. They are cleared when this app reloads." : "Saved designs from the project server."}</p></div>
@@ -29,7 +30,10 @@ export function ProjectLibrary({ projects, loading, loadingProjectId, error, ses
       <div className="project-library-list" aria-busy={loading}>
         {projects.map((project) => <article className="project-library-row" key={project.id}>
           <div className="project-library-info"><strong>{project.name}</strong>{project.description && <p>{project.description}</p>}<small>{project.currency} · Updated {new Date(project.updatedAt).toLocaleString()}</small></div>
-          <button type="button" className="primary-button" onClick={() => onLoad(project)} disabled={loading || loadingProjectId !== null}>{loadingProjectId === project.id ? "Loading…" : "Load"}</button>
+          <div className="project-library-row-actions">
+            <button type="button" className="primary-button" onClick={() => onLoad(project)} disabled={loading || loadingProjectId !== null}>{loadingProjectId === project.id ? "Loading…" : "Load"}</button>
+            {onDelete && <button type="button" className="load-button project-delete-button" onClick={() => onDelete(project)} disabled={loading || loadingProjectId !== null} aria-label={`Delete ${project.name}`}>{loadingProjectId === project.id ? "Deleting…" : "Delete"}</button>}
+          </div>
         </article>)}
       </div>
     </section>

@@ -155,6 +155,22 @@ describe("HTTP project API adapter", () => {
     await expect(createHttpProjectApi("http://localhost:8000/api/v1").getProject("gone")).rejects.toMatchObject({ status: 404, message: "Project was deleted." });
   });
 
+  it("surfaces semantic validation details when a multi-file KMZ import is rejected", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({ error: { message: "Project semantic validation failed with 1 error(s)", details: [{ field: "cableSegments[14].geometry.coordinates", message: "Route endpoint does not match its network node" }] } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const fileA = new File(["a"], "a.kmz");
+    const fileB = new File(["b"], "b.kmz");
+    const api = createHttpProjectApi("http://localhost:8000/api/v1");
+    await expect(api.importKmz([fileA, fileB], "Combined"))
+      .rejects.toThrow("cableSegments[14].geometry.coordinates: Route endpoint does not match its network node");
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(form.getAll("files")).toHaveLength(2);
+  });
+
   it("persists the project before calculating with the canonical saved ID", async () => {
     const project = createEmptyProject("Save before calculation");
     const savedProject = { ...project, updatedAt: "2026-10-17T09:00:00Z" };

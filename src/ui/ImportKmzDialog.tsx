@@ -1,65 +1,47 @@
-import { useState, useRef, type DragEvent, type ChangeEvent } from "react";
+import { useState, useRef, type ChangeEvent } from "react";
 import type { Project } from "../domain/types";
 
 interface ImportKmzDialogProps {
-  onImport: (file: File, name?: string) => Promise<Project>;
+  onImport: (files: File[], name?: string) => Promise<Project>;
   onSuccess: (project: Project) => void;
   onClose: () => void;
 }
 
 export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialogProps) {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [projectName, setProjectName] = useState<string>("");
-  const [isDragging, setIsDragging] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleFileSelected(file: File) {
-    const ext = file.name.toLowerCase();
-    if (!ext.endsWith(".kmz") && !ext.endsWith(".kml")) {
-      setError("Please select a valid Google Earth .kmz or .kml file.");
+  function handleFilesSelected(fileList: FileList | null) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) return;
+    const invalid = files.find((file) => !/\.(kmz|kml)$/i.test(file.name));
+    if (invalid) {
+      setError(`“${invalid.name}” is not a valid .kmz or .kml file.`);
       return;
     }
     setError(null);
-    setSelectedFile(file);
-    const cleanName = file.name.replace(/\.(kmz|kml)$/i, "");
-    setProjectName(cleanName);
-  }
-
-  function handleDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileSelected(e.dataTransfer.files[0]);
-    }
-  }
-
-  function handleDragOver(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setIsDragging(true);
-  }
-
-  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setIsDragging(false);
+    setSelectedFiles(files);
+    if (files.length === 1) setProjectName(files[0].name.replace(/\.(kmz|kml)$/i, ""));
+    else if (!projectName.trim()) setProjectName("Combined KMZ Import");
   }
 
   function handleInputChange(e: ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files.length > 0) {
-      handleFileSelected(e.target.files[0]);
-    }
+    handleFilesSelected(e.target.files);
+    e.target.value = "";
   }
 
   async function handleSubmit() {
-    if (!selectedFile) {
-      setError("Please select a KMZ or KML file first.");
+    if (!selectedFiles.length) {
+      setError("Please select at least one KMZ or KML file first.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const project = await onImport(selectedFile, projectName.trim() || undefined);
+      const project = await onImport(selectedFiles, projectName.trim() || undefined);
       onSuccess(project);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to import KMZ file. Check the server connection.");
@@ -80,9 +62,9 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
         <header>
           <div>
             <p className="project-library-kicker">GOOGLE EARTH INTEGRATION</p>
-            <h2 id="kmz-dialog-title">Import KMZ / KML Project</h2>
+            <h2 id="kmz-dialog-title">Import KMZ / KML Files</h2>
             <p className="project-library-subtitle">
-              Convert geographic survey placemarks (OLT, ODC, ODP, Poles, and cable routes) into a fully simulated FTTH design.
+              Select multiple survey files to combine their placemarks, homes, and cable routes into one FTTH project.
             </p>
           </div>
           <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose} disabled={loading}>
@@ -95,39 +77,22 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
             type="file"
             ref={fileInputRef}
             style={{ display: "none" }}
+            multiple
             accept=".kmz,.kml,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml"
             onChange={handleInputChange}
           />
 
-          <div
-            className={`kmz-dropzone ${isDragging ? "dragging" : ""} ${selectedFile ? "has-file" : ""}`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onClick={() => !loading && fileInputRef.current?.click()}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}
-          >
-            <div className="kmz-dropzone-icon">
-              {selectedFile ? "🗺️" : "📁"}
+          <div className={`kmz-dropzone ${selectedFiles.length ? "has-file" : ""}`}>
+            <div className="kmz-dropzone-icon">{selectedFiles.length ? "🗺️" : "📁"}</div>
+            <div className="kmz-file-info">
+              {selectedFiles.length ? <><strong>{selectedFiles.length} file{selectedFiles.length === 1 ? "" : "s"} selected</strong><span>{selectedFiles.map((file) => file.name).join(", ")}</span></> : <><strong>Select Google Earth files</strong><span>Choose one or more .kmz or .kml files from your device.</span></>}
+              <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()} disabled={loading}>
+                {selectedFiles.length ? "Choose files" : "Browse files"}
+              </button>
             </div>
-            {selectedFile ? (
-              <div className="kmz-file-info">
-                <strong>{selectedFile.name}</strong>
-                <span>{(selectedFile.size / 1024).toFixed(1)} KB · Ready to import</span>
-                <span className="kmz-change-file-link">Click or drag another file to replace</span>
-              </div>
-            ) : (
-              <div className="kmz-dropzone-prompt">
-                <strong>Drag &amp; drop your .kmz or .kml file here</strong>
-                <span>or click to browse your computer</span>
-                <small className="kmz-support-hint">Supports Google Earth Pro, Google Earth Web &amp; My Maps exports</small>
-              </div>
-            )}
           </div>
 
-          {selectedFile && (
+          {selectedFiles.length > 0 && (
             <div className="kmz-field-group">
               <label htmlFor="kmz-project-name">
                 Project Name
@@ -146,6 +111,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
           <div className="kmz-feature-features-box">
             <h4>Automatic Capabilities:</h4>
             <ul>
+              <li><strong>Multi-file import:</strong> Select multiple KMZ/KML files at once and combine them into one project.</li>
               <li><strong>Placemark Recognition:</strong> Auto-classifies OLT, ODC, ODP, Poles, and Customers by name/folder.</li>
               <li><strong>Cable Route Snapping:</strong> Geodesic distance calculation and automatic node endpoint connectivity.</li>
               <li><strong>Optical Splitters:</strong> Auto-provisions integrated 1:8 splitters for immediate budget calculations.</li>
@@ -167,7 +133,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
             type="button"
             className="primary-button"
             onClick={handleSubmit}
-            disabled={!selectedFile || loading}
+            disabled={!selectedFiles.length || loading}
           >
             {loading ? "Importing & Converting…" : "Import & Open Project"}
           </button>

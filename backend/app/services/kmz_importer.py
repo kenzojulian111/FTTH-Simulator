@@ -202,15 +202,17 @@ def parse_kmz_or_kml_bytes(
             return NodeType.ODP, "odp"
         if re.search(r"\bont\b|optical network terminal|modem", combined):
             return NodeType.ONT, "ont"
-        if re.search(r"pelanggan|customer|subscriber|client|rumah|home|user", combined):
+        if re.search(r"pelanggan|customer|subscriber|client|rumah|home|house|building|residential|hunian|user", combined):
             return NodeType.CUSTOMER, "customer"
         if re.search(r"pole|tiang|\bpln\b|\btelkom\b|\bp\d+|\bt\d+|\bp\.\d+|\bt\.\d+", combined):
             return NodeType.POLE, "pole"
-        # If name matches typical pole numbering like '1', 'T1', 'P1', 'T.01'
-        if re.match(r"^[tp]?\.?\d+$", name.strip(), re.IGNORECASE):
+        # Require an explicit pole prefix. Bare numbers are common customer
+        # labels (house numbers) and must not be classified as infrastructure.
+        if re.match(r"^[tp]\.?(?:\s*)\d+$", name.strip(), re.IGNORECASE):
             return NodeType.POLE, "pole"
-        # Default fallback: ODP if named ODP/FAT, otherwise POLE
-        return NodeType.POLE, "pole"
+        # Unknown point placemarks most often represent homes in survey files.
+        # Only positively identified infrastructure is imported as a network node.
+        return NodeType.CUSTOMER, "customer"
 
     # Helper to classify cable category
     def _classify_cable(name: str, desc: str, folder_path: List[str], length_m: float) -> Tuple[str, str, int]:
@@ -387,6 +389,48 @@ def parse_kmz_or_kml_bytes(
                 description=pm["description"] or "",
             )
             areas.append(area)
+
+            # Google Earth/My Maps house footprints are often polygons rather
+            # than point placemarks. Keep the boundary and add a customer at
+            # its centroid when its name, description, or folder identifies it
+            # as a home/residential building.
+            poly_type, _ = _classify_node(pm["name"], pm["description"], pm["folderPath"])
+            if poly_type == NodeType.CUSTOMER:
+                vertices = ring[:-1] if ring[0] == ring[-1] else ring
+                if vertices:
+                    lon = sum(point[0] for point in vertices) / len(vertices)
+                    lat = sum(point[1] for point in vertices) / len(vertices)
+                    customer_id = str(uuid.uuid4())
+                    ont_id = str(uuid.uuid4())
+                    customer_name = pm["name"] or f"Customer {len(customers) + 1}"
+                    nodes.append(NetworkNode(
+                        id=ont_id,
+                        type=NodeType.ONT,
+                        name=f"ONT - {customer_name}",
+                        location=PointGeometry(coordinates=(lon, lat)),
+                        properties={
+                            "geographicPositionSet": True,
+                            "customerId": customer_id,
+                            "deploymentStatus": "planned",
+                            "opticalEquipmentStatus": "configured",
+                            "rxSensitivityDbm": -27.0,
+                            "rxOverloadDbm": -8.0,
+                            "source": "google_earth_kmz",
+                        },
+                        created_at=now_iso,
+                        updated_at=now_iso,
+                    ))
+                    customers.append(Customer(
+                        id=customer_id,
+                        name=customer_name,
+                        address=pm["description"],
+                        location=PointGeometry(coordinates=(lon, lat)),
+                        status=CustomerStatus.PLANNED,
+                        ont_node_id=ont_id,
+                        properties={"geographicPositionSet": True, "source": "google_earth_kmz"},
+                        created_at=now_iso,
+                        updated_at=now_iso,
+                    ))
 
     # 4. Auto-snapping cable endpoints to nearest nodes and creating TopologyConnections
     connections: List[TopologyConnection] = []

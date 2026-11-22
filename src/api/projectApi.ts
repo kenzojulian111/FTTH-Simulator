@@ -11,7 +11,7 @@ export interface ProjectApi {
   calculatePoleSpans(projectId: string): Promise<PoleSpanResult>;
   validateTopology(projectId: string, project?: Project): Promise<TopologyValidationResult>;
   validateConnection(projectId: string, request: ConnectionValidationRequest): Promise<TopologyValidationResult>;
-  importKmz(file: File, name?: string): Promise<Project>;
+  importKmz(files: File[], name?: string): Promise<Project>;
 }
 export type ProjectSummary = Pick<Project, "id" | "name" | "description" | "currency" | "updatedAt">;
 
@@ -79,9 +79,9 @@ export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
     calculatePoleSpans: (id) => request(`/projects/${encodeURIComponent(id)}/calculations/pole-spans`, { method: "POST" }),
     validateTopology: (id, project) => request(`/projects/${encodeURIComponent(id)}/validate-topology`, { method: "POST", ...(project ? { body: JSON.stringify(project) } : {}) }),
     validateConnection: (id, validation) => request(`/projects/${encodeURIComponent(id)}/validate-connection`, { method: "POST", body: JSON.stringify(validation) }),
-    async importKmz(file: File, name?: string): Promise<Project> {
+    async importKmz(files: File[], name?: string): Promise<Project> {
       const formData = new FormData();
-      formData.append("file", file);
+      files.forEach((file) => formData.append("files", file));
       if (name && name.trim()) {
         formData.append("name", name.trim());
       }
@@ -96,12 +96,18 @@ export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
       }
       if (!response.ok) {
         let message = `Import failed (${response.status}).`;
+        let details: string[] = [];
         try {
           const body = await response.json();
           if (typeof body.detail === "string") message = body.detail;
           else if (typeof body.error?.message === "string") message = body.error.message;
+          if (Array.isArray(body.error?.details)) {
+            details = body.error.details.map((detail: { field?: string; message?: string }) =>
+              `${detail.field ? `${detail.field}: ` : ""}${detail.message ?? "Invalid project data"}`,
+            );
+          }
         } catch { /* response had no JSON body */ }
-        throw new ApiError(message, response.status);
+        throw new ApiError(details.length ? `${message} ${details.join("; ")}` : message, response.status, details);
       }
       return (await response.json()) as Project;
     },

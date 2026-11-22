@@ -30,6 +30,13 @@ describe("project persistence workflow", () => {
     expect(onLoad).toHaveBeenCalledWith(summary);
   });
 
+  it("offers project deletion from the saved project list", () => {
+    const onDelete = vi.fn();
+    const view = render(<ProjectLibrary projects={[summary]} loading={false} loadingProjectId={null} error={null} sessionOnly={false} onRefresh={() => undefined} onLoad={() => undefined} onDelete={onDelete} onClose={() => undefined} />);
+    act(() => view.querySelector<HTMLButtonElement>('button[aria-label="Delete Rural FTTH"]')?.click());
+    expect(onDelete).toHaveBeenCalledWith(summary);
+  });
+
   it("shows empty and unavailable project-list states", () => {
     const empty = render(<ProjectLibrary projects={[]} loading={false} loadingProjectId={null} error={null} sessionOnly={false} onRefresh={() => undefined} onLoad={() => undefined} onClose={() => undefined} />);
     expect(empty.textContent).toContain("No saved projects yet");

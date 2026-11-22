@@ -3248,3 +3248,4 @@ summary:focus-visible {
 }
 
 
+.project-library-row-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}.project-library-row .project-delete-button{border-color:#744340;color:#f0aaa2}.project-library-row .project-delete-button:hover:not(:disabled){border-color:#d17368;background:#3a2325;color:#ffd1ca}
