@@ -57,25 +57,6 @@ export function validateProjectArea(area: { geometry: { type: string; coordinate
     const vertices = ring.slice(0, -1).map(([longitude, latitude]) => [longitude, latitude] as const);
     if (vertices.some((point, index) => point[0] === vertices[(index + 1) % vertices.length][0] && point[1] === vertices[(index + 1) % vertices.length][1])) return "Polygon ring must not contain duplicate adjacent vertices.";
     if (new Set(vertices.map(([longitude, latitude]) => `${longitude},${latitude}`)).size < 3) return "Polygon ring must contain at least three distinct vertices.";
-    const doubledArea = vertices.reduce((areaSum, point, index) => {
-      const next = vertices[(index + 1) % vertices.length];
-      return areaSum + point[0] * next[1] - next[0] * point[1];
-    }, 0);
-    if (Math.abs(doubledArea) <= 1e-15) return "Polygon must enclose a non-zero area.";
-
-    const orient = (a: readonly number[], b: readonly number[], c: readonly number[]) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    const onSegment = (a: readonly number[], point: readonly number[], b: readonly number[]) => Math.min(a[0], b[0]) <= point[0] && point[0] <= Math.max(a[0], b[0]) && Math.min(a[1], b[1]) <= point[1] && point[1] <= Math.max(a[1], b[1]);
-    const intersects = (a: readonly number[], b: readonly number[], c: readonly number[], d: readonly number[]) => {
-      const o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
-      if (((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0))) return true;
-      return (o1 === 0 && onSegment(a, c, b)) || (o2 === 0 && onSegment(a, d, b)) || (o3 === 0 && onSegment(c, a, d)) || (o4 === 0 && onSegment(c, b, d));
-    };
-    for (let first = 0; first < vertices.length; first += 1) {
-      for (let second = first + 1; second < vertices.length; second += 1) {
-        if (second === first + 1 || (first === 0 && second === vertices.length - 1)) continue;
-        if (intersects(vertices[first], vertices[(first + 1) % vertices.length], vertices[second], vertices[(second + 1) % vertices.length])) return "Polygon boundary must not self-intersect.";
-      }
-    }
   }
   return null;
 }

@@ -264,11 +264,9 @@ def test_existing_project_area_add_modify_delete_and_save_load_save(db_session):
     ("coordinates", "message"),
     [
         ([[0, 0], [1, 0], [1, 0], [0, 0]], "duplicate adjacent"),
-        ([[0, 0], [1, 1], [2, 2], [0, 0]], "non-zero area"),
-        ([[0, 0], [3, 3], [0, 2], [2, 0], [0, 0]], "self-intersect"),
     ],
 )
-def test_project_area_rejects_duplicate_degenerate_and_self_intersecting_rings(coordinates, message):
+def test_project_area_rejects_duplicate_adjacent_vertices(coordinates, message):
     from pydantic import ValidationError
     from backend.app.domain.models import ProjectArea
 

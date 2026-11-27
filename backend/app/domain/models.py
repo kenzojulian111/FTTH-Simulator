@@ -725,24 +725,6 @@ class ProjectArea(CamelModel):
     description: Optional[str] = None
     classification: Optional[Literal["project_boundary", "service_area", "residential_block", "custom"]] = None
 
-    @staticmethod
-    def _segments_intersect(a, b, c, d) -> bool:
-        def orient(p, q, r):
-            return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
-
-        def on_segment(p, q, r):
-            return min(p[0], r[0]) <= q[0] <= max(p[0], r[0]) and min(p[1], r[1]) <= q[1] <= max(p[1], r[1])
-
-        o1, o2, o3, o4 = orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b)
-        if ((o1 > 0 > o2) or (o2 > 0 > o1)) and ((o3 > 0 > o4) or (o4 > 0 > o3)):
-            return True
-        return (
-            (o1 == 0 and on_segment(a, c, b))
-            or (o2 == 0 and on_segment(a, d, b))
-            or (o3 == 0 and on_segment(c, a, d))
-            or (o4 == 0 and on_segment(c, b, d))
-        )
-
     @field_validator("geometry")
     @classmethod
     def validate_polygon_geometry(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -765,22 +747,6 @@ class ProjectArea(CamelModel):
                 raise ValueError("Polygon ring must not contain duplicate adjacent vertices")
             if len(set(vertices)) < 3:
                 raise ValueError("Polygon ring must contain at least three distinct vertices")
-            doubled_area = sum(
-                vertices[index][0] * vertices[(index + 1) % len(vertices)][1]
-                - vertices[(index + 1) % len(vertices)][0] * vertices[index][1]
-                for index in range(len(vertices))
-            )
-            if abs(doubled_area) <= 1e-15:
-                raise ValueError("Polygon must enclose a non-zero area")
-            edge_count = len(vertices)
-            for first in range(edge_count):
-                a, b = vertices[first], vertices[(first + 1) % edge_count]
-                for second in range(first + 1, edge_count):
-                    if second == first + 1 or (first == 0 and second == edge_count - 1):
-                        continue
-                    c, d = vertices[second], vertices[(second + 1) % edge_count]
-                    if ProjectArea._segments_intersect(a, b, c, d):
-                        raise ValueError("Polygon boundary must not self-intersect")
         return value
 
     @field_validator("fill_opacity")
