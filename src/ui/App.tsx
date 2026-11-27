@@ -641,6 +641,19 @@ export function App() {
     if (!cableDrafting || cableDrawing?.phase !== "route" || (!cableDrawing.startLocation && cableDrawing.coordinates.length === 0)) return;
     setPreviewPoint(point);
   };
+  const moveAreaVertex = (id: string, index: number, location: Coordinate) => {
+    const area = (state.project.areas ?? []).find((item) => item.id === id);
+    if (!area) return;
+    const ring = area.geometry.coordinates[0].map((point, pointIndex) => pointIndex === index ? location : point);
+    ring[ring.length - 1] = ring[0];
+    const updatedArea = { ...area, geometry: { type: "Polygon" as const, coordinates: [ring] } };
+    const error = validateProjectArea(updatedArea);
+    if (error) {
+      setNotice(`Area vertex not moved: ${error}`);
+      return;
+    }
+    dispatch({ type: "update-area", area: updatedArea });
+  };
   const previewCoordinates = cableDrawing ? [
     ...(cableDrawing.startLocation ? [cableDrawing.startLocation] : []),
     ...cableDrawing.coordinates,
@@ -720,7 +733,7 @@ export function App() {
             {basemapMode === "earth" && <button type="button" onClick={() => { setBasemapMode("normal"); setTileErrorMessage(null); }}>Use Normal Map</button>}
           </div>
         )}
-        <NetworkMap project={state.project} tool={tool} selection={state.selection} cableDrawing={cableDrawing} previewPoint={previewPoint} failedCableIds={failedCableId ? [failedCableId] : []} basemapMode={basemapMode} onTileError={(msg) => setTileErrorMessage((current) => current ?? msg)} onMapClick={place} onMapMove={onMapMove} onCableNodeClick={onCableNodeClick} onSelect={(selection: FeatureRef) => { dispatch({ type: "select", selection }); setTool(null); }} onMove={(ref, location) => dispatch({ type: "move", ref, location })} onMoveVertex={(id, index, location) => dispatch({ type: "move-vertex", id, index, location })} areaDrawingPreview={areaPoints} searchResult={searchResult} onDismissSearchResult={() => setSearchResult(null)} onMoveAreaVertex={(id, index, location) => { const area = (state.project.areas ?? []).find((item) => item.id === id); if (!area) return; const ring = area.geometry.coordinates[0].map((point, pointIndex) => pointIndex === index ? location : point); ring[ring.length - 1] = ring[0]; dispatch({ type: "update-area", area: { ...area, geometry: { type: "Polygon", coordinates: [ring] } } }); }} />
+        <NetworkMap project={state.project} tool={tool} selection={state.selection} cableDrawing={cableDrawing} previewPoint={previewPoint} failedCableIds={failedCableId ? [failedCableId] : []} basemapMode={basemapMode} onTileError={(msg) => setTileErrorMessage((current) => current ?? msg)} onMapClick={place} onMapMove={onMapMove} onCableNodeClick={onCableNodeClick} onSelect={(selection: FeatureRef) => { dispatch({ type: "select", selection }); setTool(null); }} onMove={(ref, location) => dispatch({ type: "move", ref, location })} onMoveVertex={(id, index, location) => dispatch({ type: "move-vertex", id, index, location })} areaDrawingPreview={areaPoints} searchResult={searchResult} onDismissSearchResult={() => setSearchResult(null)} onMoveAreaVertex={moveAreaVertex} />
         <div className="map-legend"><span><i className="legend-line feeder" /> Feeder</span><span><i className="legend-line distribution" /> Distribution</span><span><i className="legend-line drop" /> Drop</span><span><i className="legend-line indoor" /> Indoor</span><span><i className="legend-line custom" /> Custom</span><span><i className="legend-line connected" /> Connected</span><span><i className="legend-line unconnected" /> Unconnected cable</span><span><i className="legend-line rejected" /> Validation failed</span><span><i className="legend-handle" /> Selected vertex</span><span className="scale-note">Coordinates: longitude / latitude</span></div>
       </section>}
 
