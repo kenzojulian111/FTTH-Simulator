@@ -29,6 +29,19 @@ def test_kmz_integration_parser_does_not_persist_into_fastapi_database(client: T
     assert client.get("/api/v1/projects").json() == {"projects": []}
 
 
+def test_integrated_engine_endpoints_calculate_from_project_payload_without_sqlite_persistence(client: TestClient, sample_project: Project):
+    payload = sample_project.model_dump(by_alias=True)
+    for route in (
+        "/api/v1/integrations/calculations/optical-budget",
+        "/api/v1/integrations/calculations/construction-cost",
+        "/api/v1/integrations/calculations/pole-spans",
+    ):
+        response = client.post(route, json=payload)
+        assert response.status_code == 200, (route, response.text)
+        assert response.json()["projectId"] == sample_project.id
+    assert client.get("/api/v1/projects").json() == {"projects": []}
+
+
 def test_docs_and_spa_frontend_serving(client: TestClient):
     """Verify /docs, root SPA index.html, SPA client-route fallback, and /api/v1 404 isolation."""
     res_docs = client.get("/docs")

@@ -140,6 +140,16 @@ def test_cost_per_connected_customer_is_null_when_only_ont_devices_exist():
     assert result.cost_per_connected_customer is None
 
 
+def test_empty_design_does_not_invent_splitter_counts_or_deduplication():
+    result = calculate_construction_cost(Project(id="p-empty", name="Empty", nodes=[]))
+
+    assert result.summary["feederSplitterCount"] == 0
+    assert result.summary["distributionSplitterCount"] == 0
+    assert result.summary["splitterCount"] == 0
+    assert result.summary["deduplicatedPropertyCount"] == 0
+    assert not any("ODP 1–14" in assumption or "2 feeder splitters" in assumption for assumption in result.assumptions)
+
+
 def test_rab_line_item_arithmetic_and_subtotals():
     """Verify RAB formal breakdown: every line amount = quantity * unit_cost, and subtotals sum to grand total."""
     olt = NetworkNode(id="olt-1", type=NodeType.OLT, name="OLT 1", location=PointGeometry(coordinates=(115.0, -8.0)))
@@ -421,6 +431,11 @@ def test_rate_status_provenance_classification():
     assert olt_item.rate_status == "Verified Quotation"
     assert olt_item.unit_cost_reference == "Supplier Quotation #Q-9912"
 
+    legacy_result = calculate_construction_cost(Project(id="legacy-rate", name="Legacy Rate", nodes=[olt]))
+    legacy_item = next(item for item in legacy_result.items if item.code == "OLT-SUPPLY")
+    assert legacy_item.unit_cost_source == "legacy_illustrative"
+    assert legacy_item.rate_status == "Legacy Illustrative"
+
 
 def test_splitter_deduplication_and_procurement_reconciliation():
     """Verify that mounted splitter nodes and ODP/ODC component properties are not double-counted,
@@ -489,6 +504,7 @@ def test_splitter_deduplication_and_procurement_reconciliation():
     assert result.summary["procuredSplitterCount"] == 4
     assert result.summary["splitterProcurementDifference"] == 0
     assert result.summary["legacyDisconnectedSplitterCount"] == 1
+    assert result.summary["deduplicatedPropertyCount"] == 1
     spl_supply = next((i for i in result.items if i.code == "SPL-SUPPLY"), None)
     assert spl_supply is not None
     assert spl_supply.quantity == 4.0

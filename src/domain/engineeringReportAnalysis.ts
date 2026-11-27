@@ -468,7 +468,7 @@ function resolveEffectiveDeviceSplitter(
         ...new Set(mounted.map((m) => lookupSplitterLoss(m, project).ratio).filter((r): r is string => Boolean(r))),
       ];
       return {
-        ratio: mounted.length > 1 ? `${mounted.length}× (${uniqueRatios.join("/") || "1:8"})` : mInfo.ratio,
+        ratio: mounted.length > 1 ? `${mounted.length}× (${uniqueRatios.join("/") || "unknown ratio"})` : mInfo.ratio,
         lossDb: mInfo.lossDb,
         source: mInfo.source === "Configured on device" ? "Configured on mounted splitter" : mInfo.source,
       };
@@ -767,10 +767,13 @@ export function analyzeEngineeringReport(
       routeStatusRaw === "map_candidate_unverified" ||
       routeStatusRaw === "estimated" ||
       cable.properties.routeVerified === false;
+    const hasExplicitRouteVerification =
+      cable.properties.routeVerified === true ||
+      ["verified", "field_verified", "surveyed"].includes(routeStatusRaw?.toLowerCase() ?? "");
 
     let lengthStatus: CableAnalysisItem["lengthStatus"] = "Unknown";
     if (lengthM !== null && lengthM > 0) {
-      lengthStatus = isUnverifiedRoute || !hasGeometry ? "Estimated / Unverified" : "Verified";
+      lengthStatus = !isUnverifiedRoute && hasGeometry && hasExplicitRouteVerification ? "Verified" : "Estimated / Unverified";
     }
 
     const defaultFiberAtten =
@@ -1498,23 +1501,20 @@ export function analyzeEngineeringReport(
     const odpNode = pathNodes.find((n) => n.type === "odp") ?? null;
     const ontNode = nodesById[ontRow.ontId] ?? null;
 
-    // Trace connections along the path or incoming to ONT
-    const findConnBetween = (fromId: string | undefined, toId: string | undefined): TopologyConnection | undefined => {
-      if (!fromId || !toId) return undefined;
-      return project.connections.find((c) => c.fromNodeId === fromId && c.toNodeId === toId);
-    };
-
-    const feederConn =
-      findConnBetween(oltNode?.id, odcNode?.id) ??
-      (oltNode ? project.connections.find((c) => c.fromNodeId === oltNode.id) : undefined);
+    const pathConnections = (path?.connectionIds ?? [])
+      .map((id) => project.connections.find((connection) => connection.id === id))
+      .filter((connection): connection is TopologyConnection => Boolean(connection));
+    const feederConn = oltNode
+      ? pathConnections.find((connection) => connection.fromNodeId === oltNode.id)
+      : undefined;
     const feederCable = feederConn ? cablesById[feederConn.cableSegmentId] : undefined;
 
-    const distConn =
-      findConnBetween(odcNode?.id, odpNode?.id) ??
-      (odpNode ? project.connections.find((c) => c.toNodeId === odpNode.id) : undefined);
+    const distConn = odcNode && odpNode
+      ? pathConnections.find((connection) => connection.fromNodeId === odcNode.id && connection.toNodeId === odpNode.id)
+      : undefined;
     const distCable = distConn ? cablesById[distConn.cableSegmentId] : undefined;
 
-    const dropConn = project.connections.find((c) => c.toNodeId === ontRow.ontId);
+    const dropConn = pathConnections.find((connection) => connection.toNodeId === ontRow.ontId);
     const dropCable = dropConn ? cablesById[dropConn.cableSegmentId] : undefined;
 
     const oltDevRow = oltNode ? deviceInfrastructure.find((d) => d.nodeId === oltNode.id) : undefined;
@@ -1528,19 +1528,11 @@ export function analyzeEngineeringReport(
 
     const odpSplitter = odpNode ? resolveEffectiveDeviceSplitter(odpNode, project, splitterNodes) : { ratio: null, lossDb: null };
 
-    const spNames = (path?.splitters ?? []).map((s) => s.nodeName);
-    const isPon2 =
-      spNames.some((s) => s.includes("PON 2")) ||
-      (odpNode && ["ODP 1", "ODP 4", "ODP 5", "ODP 8", "ODP 9", "ODP 11", "ODP 13"].some((name) => getNodeLabel(odpNode).startsWith(name)));
-    const feederSplitterInPath = path?.splitters?.find((s) => s.nodeName.includes("Feeder Splitter"));
-    const odcSplitterSummary = feederSplitterInPath
-      ? `${cleanDisplayName(feederSplitterInPath.nodeName).replace(/\[.*?\]/g, "").trim()} (${feederSplitterInPath.splitterRatio ?? "1:8"})`
-      : isPon2
-        ? "ODC 1 Feeder Splitter PON 2 (1:8 Proposed)"
-        : (odcDevRow?.splitterRatio && odcDevRow.splitterRatio !== "N/A" ? odcDevRow.splitterRatio : (odcNode ? "ODC 1 Feeder Splitter PON 1 (1:8 Active)" : "Pass-through"));
-    const oltPonPortDisplay = isPon2
-      ? "PON 2 (Proposed)"
-      : (matchedPonPort?.label ? `${matchedPonPort.label} (Active)` : (oltNode ? "PON 1 (Active)" : "N/A"));
+    const splittersAtOdc = (path?.splitters ?? []).filter((splitter) => splitter.nodeId === odcNode?.id);
+    const odcSplitterSummary = splittersAtOdc.length
+      ? splittersAtOdc.map((splitter) => `${cleanDisplayName(splitter.nodeName)} (${splitter.splitterRatio ?? "unknown ratio"})`).join(", ")
+      : odcNode ? "No splitter encountered at this ODC" : "N/A";
+    const oltPonPortDisplay = matchedPonPort?.label ?? "Not configured";
 
     infrastructureBranches.push({
       branchId: `branch-ont-${ontRow.ontId}`,
@@ -2068,15 +2060,15 @@ export function analyzeEngineeringReport(
   if (duplicateNamedOdps.length > 0 || (embeddedSplitterDevices.length > 0 && splitterNodes.length > 0)) {
     const affectedGovernance = [
       ...duplicateNamedOdps.map((d) => getNodeLabel(d)),
-      ...embeddedSplitterDevices.map((d) => `${getNodeLabel(d)} (integrated 10.38 dB vs mounted 10.00 dB)`),
+      ...embeddedSplitterDevices.map((d) => `${getNodeLabel(d)} has both integrated and mounted splitter declarations; verify whether these represent one physical device.`),
     ];
     recommendations.push({
       id: "rec-odp-splitter-governance",
       priority: "LOW",
       category: "Port & Splitter Capacity",
-      finding: `Two ODP enclosures share the display name 'ODP 2' (4c58feef and 65f3967e, the 10th ODP in sequence), and 65f3967e uses its ODP-integrated 1:8 splitter loss (10.38 dB from project table) rather than a dedicated mounted splitter node (10.00 dB).`,
+      finding: `${duplicateNamedOdps.length} duplicate ODP display-name group(s) or mixed integrated/mounted splitter declaration(s) were found in this project.`,
       recommendation:
-        "Standardize ODP display labels in the GIS inventory (e.g., rename 65f3967e to 'ODP 10') and align 1:8 PLC splitter loss modeling (10.00 dB vs. 10.38 dB) across all 14 ODP enclosures once vendor datasheets are finalized.",
+        "Review object labels and splitter declarations for this project. The optical engine de-duplicates mounted and integrated declarations where their IDs and host relationships establish that they describe the same physical device; verify ambiguous records against project documentation.",
       affectedEntities: [...new Set(affectedGovernance)],
     });
   }

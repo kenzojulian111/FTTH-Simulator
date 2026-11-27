@@ -80,6 +80,9 @@ describe("engineering reports", () => {
     expect(view.textContent).toContain("supplier quote #Q17");
     expect(view.textContent).toContain("cable IDs c1");
     expect(view.textContent).toContain("proposed 1");
+    expect(view.textContent).not.toContain("110 ONTs");
+    expect(view.textContent).not.toContain("Rp 3.400.000");
+    expect(view.textContent).not.toContain("RAB-FTTH-2026-001");
   });
 
   it("shows RAB empty and calculation error states without fabricating rows", () => {
@@ -95,6 +98,16 @@ describe("engineering reports", () => {
     expect(view.textContent).toContain("Incomplete estimate");
     expect(view.textContent).toContain("POLE-SUPPLY: unit_rate_unknown");
     expect(view.textContent).not.toContain("850,000");
+  });
+
+  it("labels legacy illustrative rates separately from configured planning rates", () => {
+    const legacyResult: ConstructionCostResult = {
+      ...costResult,
+      items: [{ ...costResult.items[0], unitCostSource: "legacy_illustrative", rateStatus: "Planning Estimate" }],
+    };
+    const view = render(<RabReport projectName="Legacy rates" result={legacyResult} loading={false} error={null} onBack={() => undefined} />);
+    expect(view.textContent).toContain("Legacy Illustrative");
+    expect(view.textContent).toContain("bukan quotation atau tarif terverifikasi");
   });
 
   it("renders configured Router rows when returned by the backend cost result", () => {
@@ -124,6 +137,11 @@ describe("engineering reports", () => {
     expect(view.textContent).toContain("Total design attenuation allowance");
     expect(view.textContent).toContain("Customer One");
     expect(view.textContent).toContain("customer-offline");
+    expect(view.textContent).toContain("UNVERIFIED");
+    expect(view.textContent).not.toContain("+6.00 dBm");
+    expect(view.textContent).not.toContain("Cable 6 (1,120.08 m · Feeder)");
+    expect(view.textContent).not.toContain("ODC 1 houses two 1:8 primary PLC splitters");
+    expect(view.textContent).not.toContain("10.38 dB vs. mounted 10.00 dB");
   });
 
   it("renders the same backend calculation rows and passive prefixes in report output", () => {
@@ -552,16 +570,17 @@ describe("engineering reports", () => {
     );
 
     const text = view.textContent ?? "";
-    expect(text).toContain("RAB-FTTH-2026-001");
-    expect(text).toContain("Revised Preliminary Cost Estimate (Rev 1.1)");
+    expect(text).toContain("RAB-test-proj-calc-physical-20261031");
+    expect(text).toContain("Preliminary estimate complete");
     expect(text).toContain("Planned Customers (Pelanggan Direncanakan)");
     expect(text).toContain("Assigned ONTs (ONT Ditugaskan)");
     expect(text).toContain("Connected Customers (Pelanggan Aktif Terhubung)");
-    expect(text).toContain("Pelanggan dengan status aktif operasional (0 pada fase pra-konstruksi/perencanaan)");
+    expect(text).toContain("Pelanggan dengan status aktif operasional yang tercatat pada hasil kalkulasi.");
     expect(text).toContain("Estimated CAPEX per Planned Customer");
     expect(text).toContain("2,280,093.18");
-    expect(text).toContain("N/A · Proyek berada pada tahap pra-konstruksi");
-    expect(text).toContain("Rekonsiliasi Pengadaan Terverifikasi");
+    expect(text).toContain("N/A · Tidak ada pelanggan connected yang tercatat.");
+    expect(text).toContain("Rekonsiliasi splitter mengikuti node dan konfigurasi enclosure pada proyek.");
+    expect(text).not.toContain("2 feeder splitters in ODC 1 and 14 access splitters across ODP 1–14");
     expect(text).toContain("16");
     expect(text).toContain("Proposed (Tiang Baru)");
     expect(text).toContain("Existing (Tiang Eksisting)");

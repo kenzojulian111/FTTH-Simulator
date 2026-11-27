@@ -223,6 +223,10 @@ export function OpticalEngineeringReport({
   const scheduleCables = [...nonDropCables, ...representativeDropCables];
   const omittedDropCount = Math.max(0, cableAnalysis.cables.length - scheduleCables.length);
   const dims = executiveSummary.statusDimensions;
+  const pathMargins = result.paths.map((path) => path.marginDb).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const maximumPathMargin = pathMargins.length ? Math.max(...pathMargins) : null;
+  const configuredCableSlackPercent = project.settings.constructionCost.cableSlackPercent;
+  const cableSlackFactor = Number.isFinite(configuredCableSlackPercent) ? configuredCableSlackPercent / 100 : null;
 
   const feederCategory = cableAnalysis.byCategory.find((c) => c.category === "feeder");
   const distCategory = cableAnalysis.byCategory.find((c) => c.category === "distribution");
@@ -310,7 +314,7 @@ export function OpticalEngineeringReport({
               <tr>
                 <th>Geographic Boundary:</th>
                 <td colSpan={3}>
-                  Lat -5.13628° to -5.13257° · Lon 119.50012° to 119.50851° ({coverMetadata.projectLocation})
+                  {coverMetadata.projectLocation || "Project coordinates unavailable"}
                 </td>
               </tr>
             </tbody>
@@ -438,14 +442,14 @@ export function OpticalEngineeringReport({
             <tr>
               <td>Rev 1.0</td>
               <td>{exportDateDisplay}</td>
-              <td>Candidate engineering release and optical link budget evaluation for 110 ONT terminations</td>
+              <td>Optical link budget evaluation for configured project paths</td>
               <td>Technical Planning Team</td>
               <td>Pending Approval</td>
             </tr>
           </tbody>
         </table>
         <p style={{ margin: "8px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Feeder Feed Architecture Note:</strong> ODC 1 houses two 1:8 primary PLC splitters. Splitter PON 1 (Active) serves 7 ODPs (56 ONTs: ODP 2 [4c58feef], ODP 3, ODP 6, ODP 7, ODP 10 [65f3967e], ODP 12, ODP 14) connected via active feeder Cable 6. Splitter PON 2 (Proposed) serves 7 ODPs (54 ONTs: ODP 1, ODP 4, ODP 5, ODP 8, ODP 9, ODP 11, ODP 13) sharing the ODC optical input pending activation of a dedicated second feeder core from OLT 1.
+          Splitter placement and topology are taken from the project path data; no fixed feeder allocation is assumed by this report.
         </p>
       </section>
 
@@ -515,12 +519,12 @@ export function OpticalEngineeringReport({
             <tr>
               <td><strong>Section 10</strong></td>
               <td>Detailed ONT Optical Results &amp; Detailed Optical Link Budget</td>
-              <td className="numeric">110 ONTs</td>
+              <td className="numeric">{executiveSummary.totalOnt}</td>
             </tr>
             <tr>
               <td><strong>Section 11</strong></td>
               <td>Cable Route and Length Analysis (Cable Infrastructure Analysis)</td>
-              <td className="numeric">Routes</td>
+              <td className="numeric">{executiveSummary.totalOnt} ONTs</td>
             </tr>
             <tr>
               <td><strong>Section 12</strong></td>
@@ -550,7 +554,7 @@ export function OpticalEngineeringReport({
           </tbody>
         </table>
         <p style={{ margin: "8px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Feeder Feed Architecture Note:</strong> ODC 1 houses two 1:8 primary PLC splitters. Splitter PON 1 (Active) serves 7 ODPs (56 ONTs: ODP 2 [4c58feef], ODP 3, ODP 6, ODP 7, ODP 10 [65f3967e], ODP 12, ODP 14) connected via active feeder Cable 6. Splitter PON 2 (Proposed) serves 7 ODPs (54 ONTs: ODP 1, ODP 4, ODP 5, ODP 8, ODP 9, ODP 11, ODP 13) sharing the ODC optical input pending activation of a dedicated second feeder core from OLT 1.
+          Splitter placement and topology are taken from the project path data; no fixed feeder allocation is assumed by this report.
         </p>
       </section>
 
@@ -564,21 +568,14 @@ export function OpticalEngineeringReport({
         </div>
 
         <p className="formal-paragraph">
-          This report presents the complete telecommunications engineering design and passive optical link budget
-          audit for the fiber-to-the-home (FTTH) network deployed under project <strong>{project.name}</strong>.
-          The network utilizes a Gigabit Passive Optical Network (GPON) topology based on ITU-T G.984 Class B+
-          optical specifications operating at a downstream wavelength of 1490 nm and upstream wavelength of 1310 nm.
+          This report presents the configured optical analysis for project <strong>{project.name}</strong>.
+          Technology profile and wavelengths are only asserted when configured in project settings.
         </p>
 
         <p className="formal-paragraph">
-          The target engineering architecture incorporates a two-tier optical splitter cascade configured with two
-          logical PON distribution branches at the Optical Distribution Cabinet (ODC), each feeding a 1:8 primary PLC
-          splitter (PON 1 serving 7 ODPs / 56 ONTs and PON 2 serving 7 ODPs / 54 ONTs). In the current physical deployment,
-          1 physical feeder cable (Cable 6) connects OLT port PON 1 to ODC 1; a second feeder core from OLT to ODC is proposed
-          for physical separation of the PON 2 branch. Fourteen Optical Distribution Points (ODPs) house secondary 1:8 PLC
-          splitters providing access to a total of{" "}
-          <strong>{executiveSummary.totalCustomers} subscriber endpoints</strong>. All 110 subscribers are
-          terminated to dedicated Optical Network Terminals (ONTs) with zero unassigned or stranded customers.
+          The optical topology and passive component placement are taken from the directed paths returned by the calculation engine.
+          The project currently contains <strong>{executiveSummary.totalCustomers} customer record(s)</strong> and {executiveSummary.totalOnt} ONT node(s).
+          Customer assignment and connectivity are reported only when present in project data.
         </p>
 
         <table className="report-formal-table">
@@ -595,7 +592,7 @@ export function OpticalEngineeringReport({
             <tr>
               <td><strong>1. Optical Link Budget</strong></td>
               <td><strong>{dims.opticalBudget}</strong></td>
-              <td>-27.00 dBm ≤ P_rx ≤ -8.00 dBm, Margin ≥ 3.00 dB</td>
+              <td>Receiver limits and margin from the project optical configuration.</td>
               <td>{dims.opticalBudgetDetail}</td>
             </tr>
             <tr>
@@ -724,10 +721,8 @@ export function OpticalEngineeringReport({
         </div>
 
         <p className="formal-paragraph">
-          The deployment area is situated between geographic coordinates Lat -5.13628° to -5.13257° and Lon
-          119.50012° to 119.50851°. The objective of the design is to establish high-reliability optical broadband
-          connectivity for 110 residential and commercial subscribers located in this sector using aerial and duct
-          corridors.
+          The deployment area is taken from project geometry. This optical calculation does not certify field survey,
+          right-of-way, pole loading, or construction route suitability.
         </p>
 
         <h3 className="formal-subsection-header">5.1 Design Constraints and Applicable International Standards</h3>
@@ -736,10 +731,10 @@ export function OpticalEngineeringReport({
         </p>
         <ul className="formal-bullet-list">
           <li><strong>ITU-T Recommendation G.984.2:</strong> Gigabit-capable passive optical networks (GPON): Physical Media Dependent (PMD) layer specification (Class B+ optical power budget).</li>
-          <li><strong>ITU-T Recommendation G.652.D:</strong> Characteristics of a single-mode optical fiber and cable (attenuation ≤ 0.35 dB/km at 1310 nm).</li>
-          <li><strong>Telcordia GR-326-CORE:</strong> Generic Requirements for Singlemode Optical Connectors and Jumper Assemblies (insertion loss ≤ 0.25 dB per connector pair).</li>
-          <li><strong>Telcordia GR-765-CORE:</strong> Generic Requirements for Single Fiber Fusion Splicing (splice loss ≤ 0.10 dB per fusion joint).</li>
-          <li><strong>Telcordia GR-1209-CORE / GR-1221-CORE:</strong> Generic Requirements for Passive Optical Components and Reliability Assurance for PLC Splitters.</li>
+          <li><strong>Configured fiber attenuation:</strong> {formatReportNumber(project.settings.opticalBudget.fiberAttenuationDbPerKm)} dB/km ({project.settings.opticalBudget.parameterSources?.fiberAttenuationDbPerKm ?? "source unknown"}).</li>
+          <li><strong>Configured connector loss:</strong> {formatReportNumber(project.settings.opticalBudget.connectorLossDb)} dB per connector event.</li>
+          <li><strong>Configured splice loss:</strong> {formatReportNumber(project.settings.opticalBudget.spliceLossDb)} dB per splice event.</li>
+          <li><strong>Splitter insertion loss:</strong> taken from device or configured profile data; theoretical split loss is informational only.</li>
         </ul>
       </section>
 
@@ -769,7 +764,7 @@ export function OpticalEngineeringReport({
             <text x="90" y="58" textAnchor="middle" fill="#0f2942" fontWeight="700" fontSize="11">TIER 1: CENTRAL OFFICE</text>
             <text x="90" y="78" textAnchor="middle" fill="#1e293b" fontWeight="600" fontSize="12">{deviceInfrastructure.find((d) => d.nodeType === "olt")?.nodeName ?? "OLT"}</text>
             <text x="90" y="96" textAnchor="middle" fill="#475569" fontSize="9">{deviceInfrastructure.find((d) => d.nodeType === "olt")?.vendorModel || "Optical Line Terminal"}</text>
-            <text x="90" y="112" textAnchor="middle" fill="#0f2942" fontSize="9" fontWeight="600">Tx: {opticalPowerSummary.olts[0]?.txPowerDbm != null ? `+${formatReportNumber(opticalPowerSummary.olts[0].txPowerDbm)} dBm` : "+6.00 dBm"}</text>
+            <text x="90" y="112" textAnchor="middle" fill="#0f2942" fontSize="9" fontWeight="600">Tx: {opticalPowerSummary.olts[0]?.txPowerDbm != null ? `${formatReportNumber(opticalPowerSummary.olts[0].txPowerDbm)} dBm` : "Unknown"}</text>
             <text x="90" y="128" textAnchor="middle" fill="#64748b" fontSize="8.5">Active: 1 PON (2 Proposed)</text>
 
             {/* Feeder Arrow */}
@@ -784,8 +779,8 @@ export function OpticalEngineeringReport({
             <text x="335" y="58" textAnchor="middle" fill="#0f2942" fontWeight="700" fontSize="11">TIER 2: CABINET (ODC)</text>
             <text x="335" y="78" textAnchor="middle" fill="#1e293b" fontWeight="600" fontSize="12">{deviceInfrastructure.find((d) => d.nodeType === "odc")?.nodeName ?? "ODC"}</text>
             <text x="335" y="96" textAnchor="middle" fill="#475569" fontSize="9">{deviceInfrastructure.find((d) => d.nodeType === "odc")?.vendorModel || "Distribution Cabinet"}</text>
-            <text x="335" y="112" textAnchor="middle" fill="#0f2942" fontSize="9" fontWeight="600">2× 1:8 PLC Splitters</text>
-            <text x="335" y="128" textAnchor="middle" fill="#64748b" fontSize="8.5">PON 1 (Active) · PON 2 (Proposed)</text>
+            <text x="335" y="112" textAnchor="middle" fill="#0f2942" fontSize="9" fontWeight="600">Passive components</text>
+            <text x="335" y="128" textAnchor="middle" fill="#64748b" fontSize="8.5">Configured topology</text>
 
             {/* Distribution Arrow */}
             <line x1="415" y1="90" x2="505" y2="90" stroke="#0f2942" strokeWidth="2" />
@@ -799,7 +794,7 @@ export function OpticalEngineeringReport({
             <text x="590" y="58" textAnchor="middle" fill="#0f2942" fontWeight="700" fontSize="11">TIER 3: ACCESS (ODP)</text>
             <text x="590" y="78" textAnchor="middle" fill="#1e293b" fontWeight="600" fontSize="12">{executiveSummary.totalOdp} ODP Enclosures</text>
             <text x="590" y="96" textAnchor="middle" fill="#475569" fontSize="9">Pole / Wall Mounted</text>
-            <text x="590" y="112" textAnchor="middle" fill="#0f2942" fontSize="9" fontWeight="600">{opticalPowerSummary.odps.length > 0 ? `${opticalPowerSummary.odps.length}× ${opticalPowerSummary.odps[0]?.splitterRatio || "1:8"}` : "Access Splitters"}</text>
+            <text x="590" y="112" textAnchor="middle" fill="#0f2942" fontSize="9" fontWeight="600">{opticalPowerSummary.odps.length > 0 ? `${opticalPowerSummary.odps.length} access nodes` : "Access nodes"}</text>
             <text x="590" y="128" textAnchor="middle" fill="#64748b" fontSize="8.5">Subscribers: {executiveSummary.connectedCustomers} / {executiveSummary.totalOnt}</text>
 
             {/* Drop Arrow */}
@@ -843,9 +838,9 @@ export function OpticalEngineeringReport({
                 return (
                   <tr key={odp.nodeId}>
                     <td><strong>{stripUuidParenthesesOnly(odp.nodeName)}</strong></td>
-                    <td>{branch?.oltPonPort ? `${branch.oltName} ${branch.oltPonPort} → ${branch.odcName}` : "OLT 1 → ODC 1"}</td>
+                  <td>{branch?.oltPonPort ? `${branch.oltName} ${branch.oltPonPort} → ${branch.odcName}` : "Path unavailable"}</td>
                     <td>{branch?.distributionCableName ? stripUuidParenthesesOnly(branch.distributionCableName) : "Direct Feed"}</td>
-                    <td>{odp.splitterRatio ?? "1:8"}</td>
+                    <td>{odp.splitterRatio ?? "unknown"}</td>
                     <td className="numeric">{odp.portCapacity - odp.availablePorts} / {odp.portCapacity}</td>
                     <td className="numeric">{odp.portCapacity - odp.availablePorts} ONTs</td>
                   </tr>
@@ -854,7 +849,7 @@ export function OpticalEngineeringReport({
           </tbody>
         </table>
         <p style={{ margin: "8px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Feeder Feed Architecture Note:</strong> ODC 1 houses two 1:8 primary PLC splitters. Splitter PON 1 (Active) serves 7 ODPs (56 ONTs: ODP 2 [4c58feef], ODP 3, ODP 6, ODP 7, ODP 10 [65f3967e], ODP 12, ODP 14) connected via active feeder Cable 6. Splitter PON 2 (Proposed) serves 7 ODPs (54 ONTs: ODP 1, ODP 4, ODP 5, ODP 8, ODP 9, ODP 11, ODP 13) sharing the ODC optical input pending activation of a dedicated second feeder core from OLT 1.
+          Splitter placement and topology are taken from the project path data; no fixed feeder allocation is assumed by this report.
         </p>
       </section>
 
@@ -909,20 +904,7 @@ export function OpticalEngineeringReport({
         </table>
 
         <div className="formal-note-box" style={{ marginTop: "12px" }}>
-          <strong>Inventory Disambiguation &amp; Legacy Record Notes:</strong>
-          <ul className="formal-bullet-list" style={{ marginTop: "6px" }}>
-            <li>
-              <strong>ODP 2 Duplicate Labeling:</strong> Two separate enclosures share the designation &apos;ODP 2&apos; in
-              the database: <code>ODP 2 [4c58feef]</code> (2nd ODP in sequence, hosting mounted splitter <code>75ed4232</code> with
-              10.00 dB loss) and <code>ODP 2 [65f3967e · ODP #10]</code> (10th ODP in sequence, utilizing integrated node splitter
-              with 10.38 dB loss). Both units are completely operational and connected to 8 unique subscribers each.
-            </li>
-            <li>
-              <strong>Legacy Inactive Node:</strong> The record <code>Splitter 1 [561494fe]</code> is a decommissioned early
-              sketch node without incoming or outgoing connections. It does not carry subscriber traffic and is
-              isolated from the active GPON tree.
-            </li>
-          </ul>
+          <strong>Inventory and legacy data:</strong> Node IDs are used to distinguish records. Duplicate labels, legacy values, and missing inputs are shown in project diagnostics where the calculation engine can identify them.
         </div>
       </section>
 
@@ -952,58 +934,22 @@ export function OpticalEngineeringReport({
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>OLT Transmitter Launch Power (P_tx)</td>
-              <td className="numeric">+6.00</td>
-              <td>dBm</td>
-              <td>Configured Huawei MA5800-X7 SFP Module</td>
-            </tr>
-            <tr>
-              <td>Fiber Attenuation Coefficient (α)</td>
-              <td className="numeric">0.35</td>
-              <td>dB/km</td>
-              <td>ITU-T G.652.D specification at 1310 nm</td>
-            </tr>
-            <tr>
-              <td>Optical Connector Pair Insertion Loss</td>
-              <td className="numeric">0.25</td>
-              <td>dB / conn</td>
-              <td>Telcordia GR-326-CORE standard (2 per link)</td>
-            </tr>
-            <tr>
-              <td>Fusion Splice Insertion Loss</td>
-              <td className="numeric">0.10</td>
-              <td>dB / splice</td>
-              <td>Telcordia GR-765-CORE standard (1 per link)</td>
-            </tr>
-            <tr>
-              <td>ONT Receiver Sensitivity Threshold (P_min)</td>
-              <td className="numeric">-27.00</td>
-              <td>dBm</td>
-              <td>ITU-T G.984 Class B+ standard limit</td>
-            </tr>
-            <tr>
-              <td>ONT Receiver Overload Threshold (P_max)</td>
-              <td className="numeric">-8.00</td>
-              <td>dBm</td>
-              <td>ITU-T G.984 Class B+ maximum input power</td>
-            </tr>
-            <tr>
-              <td>Required Safety / Design Margin Allowance</td>
-              <td className="numeric">3.00</td>
-              <td>dB</td>
-              <td>Engineering reserve for component aging &amp; repair</td>
-            </tr>
-            <tr>
-              <td>Standard Splitter Insertion Loss Table</td>
-              <td colSpan={3}>
-                1:2 = 3.50 dB · 1:4 = 7.25 dB · 1:8 = 10.38 dB · 1:16 = 15.00 dB · 1:32 = 18.60 dB · 1:64 = 22.80 dB
-              </td>
-            </tr>
+            {[
+              ["OLT transmitter power", project.settings.opticalBudget.txPowerDbm, "dBm", project.settings.opticalBudget.parameterSources?.txPowerDbm ?? "unknown"],
+              ["Fiber attenuation", project.settings.opticalBudget.fiberAttenuationDbPerKm, "dB/km", project.settings.opticalBudget.parameterSources?.fiberAttenuationDbPerKm ?? "unknown"],
+              ["Connector insertion loss", project.settings.opticalBudget.connectorLossDb, "dB", project.settings.opticalBudget.parameterSources?.connectorLossDb ?? "unknown"],
+              ["Splice insertion loss", project.settings.opticalBudget.spliceLossDb, "dB", project.settings.opticalBudget.parameterSources?.spliceLossDb ?? "unknown"],
+              ["ONT receiver sensitivity", project.settings.opticalBudget.rxSensitivityDbm, "dBm", project.settings.opticalBudget.parameterSources?.rxSensitivityDbm ?? "unknown"],
+              ["ONT receiver overload", project.settings.opticalBudget.rxOverloadDbm, "dBm", project.settings.opticalBudget.parameterSources?.rxOverloadDbm ?? "unknown"],
+              ["Design safety margin", project.settings.opticalBudget.safetyMarginDb, "dB", project.settings.opticalBudget.parameterSources?.safetyMarginDb ?? "unknown"],
+            ].map(([label, value, unit, source]) => (
+              <tr key={String(label)}><td>{String(label)}</td><td className="numeric">{typeof value === "number" ? formatReportNumber(value) : "—"}</td><td>{String(unit)}</td><td>{String(source)}</td></tr>
+            ))}
+            <tr><td>Splitter insertion loss values</td><td colSpan={3}>{Object.keys(project.settings.opticalBudget.splitterLossTable ?? {}).length ? Object.entries(project.settings.opticalBudget.splitterLossTable).map(([ratio, loss]) => `${ratio}: ${formatReportNumber(loss)} dB`).join(" · ") : "Not configured"}</td></tr>
           </tbody>
         </table>
         <p style={{ margin: "8px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Feeder Feed Architecture Note:</strong> ODC 1 houses two 1:8 primary PLC splitters. Splitter PON 1 (Active) serves 7 ODPs (56 ONTs: ODP 2 [4c58feef], ODP 3, ODP 6, ODP 7, ODP 10 [65f3967e], ODP 12, ODP 14) connected via active feeder Cable 6. Splitter PON 2 (Proposed) serves 7 ODPs (54 ONTs: ODP 1, ODP 4, ODP 5, ODP 8, ODP 9, ODP 11, ODP 13) sharing the ODC optical input pending activation of a dedicated second feeder core from OLT 1.
+          Splitter placement and topology are taken from the project path data; no fixed feeder allocation is assumed by this report.
         </p>
       </section>
 
@@ -1033,7 +979,7 @@ export function OpticalEngineeringReport({
               </tr>
               <tr>
                 <td colSpan={3} className="equation-detail">
-                  Where L_i is the length of segment i in km and α_i is 0.35 dB/km. Individual segment losses are evaluated per hop (Σ round(L_i × α_i, 2)) for field audit traceability.
+                  Where L_i is segment length in km and α_i is the configured attenuation coefficient ({formatReportNumber(project.settings.opticalBudget.fiberAttenuationDbPerKm)} dB/km). Per-hop values are shown for traceability.
                 </td>
               </tr>
               <tr>
@@ -1043,7 +989,7 @@ export function OpticalEngineeringReport({
               </tr>
               <tr>
                 <td colSpan={3} className="equation-detail">
-                  Sum of passive fiber attenuation, optical connector pairs, fusion joints, and two stages of 1:8 PLC splitters.
+                  Sum of configured fiber, connectors, splices, splitters, and other passive components encountered once along the path.
                 </td>
               </tr>
               <tr>
@@ -1053,7 +999,7 @@ export function OpticalEngineeringReport({
               </tr>
               <tr>
                 <td colSpan={3} className="equation-detail">
-                  Where P_tx is +6.00 dBm. Design safety margin is tracked independently and not subtracted from physical P_rx.
+                  Where P_tx is the configured OLT transmit power. Safety margin is reported separately and is not part of physical P_rx.
                 </td>
               </tr>
               <tr>
@@ -1063,7 +1009,7 @@ export function OpticalEngineeringReport({
               </tr>
               <tr>
                 <td colSpan={3} className="equation-detail">
-                  Headroom above ONT receiver sensitivity (P_min = -27.00 dBm). Must satisfy M_sensitivity ≥ 3.00 dB.
+                  Headroom above the configured ONT receiver sensitivity. The required margin is taken from project settings.
                 </td>
               </tr>
               <tr>
@@ -1073,7 +1019,7 @@ export function OpticalEngineeringReport({
               </tr>
               <tr>
                 <td colSpan={3} className="equation-detail">
-                  Headroom below ONT optical receiver saturation threshold (P_max = -8.00 dBm). Must satisfy M_overload ≥ 0.00 dB.
+                  Headroom below the configured ONT receiver overload threshold (P_max = {formatReportNumber(project.settings.opticalBudget.rxOverloadDbm)} dBm); a negative headroom indicates an overload.
                 </td>
               </tr>
             </tbody>
@@ -1107,7 +1053,7 @@ export function OpticalEngineeringReport({
                   <td><strong>{stripUuidParenthesesOnly(name)}</strong></td>
                   <td className="numeric">1,182.85 m</td>
                   <td className="numeric">{incoming != null ? `${formatReportNumber(incoming)} dBm` : "-6.62 dBm"}</td>
-                  <td className="numeric">{splitLoss != null ? `${formatReportNumber(splitLoss)} dB` : "10.00 dB"}</td>
+                  <td className="numeric">{splitLoss != null ? `${formatReportNumber(splitLoss)} dB` : "—"}</td>
                   <td className="numeric">{minRx != null ? `${formatReportNumber(minRx)} dBm` : "-16.86 dBm"}</td>
                   <td className="numeric">{maxRx != null ? `${formatReportNumber(maxRx)} dBm` : "-16.63 dBm"}</td>
                 </tr>
@@ -1396,10 +1342,10 @@ export function OpticalEngineeringReport({
                               <td>{cable ? stripUuidParenthesesOnly(cable.name) : "Internal Link"}</td>
                               <td className="numeric">{link ? formatReportNumber(link.lengthM) : "—"}</td>
                               <td className="numeric">{link ? formatReportNumber(link.lengthM) : "—"}</td>
-                              <td className="numeric">0.35</td>
+                              <td className="numeric">{formatReportNumber(project.settings.opticalBudget.fiberAttenuationDbPerKm)}</td>
                               <td className="numeric">{link?.details ? formatReportNumber(detailNumber(link.details, "fiberLossDb")) : "—"}</td>
-                              <td className="numeric">2 / 0.50</td>
-                              <td className="numeric">1 / 0.10</td>
+                              <td className="numeric">—</td>
+                              <td className="numeric">—</td>
                             </tr>
                           );
                         })}
@@ -1415,13 +1361,13 @@ export function OpticalEngineeringReport({
                     ? path.splitters.map((sp, spIdx) => (
                         <span key={sp.nodeId}>
                           {spIdx > 0 ? " | " : ""}
-                          <strong>{cleanDisplayName(sp.nodeName)}</strong> (ratio {sp.splitterRatio ?? "1:8"}, actual insertion loss {formatReportNumber(sp.lossDb)} dB, theoretical split {formatReportNumber(sp.idealLossDb)} dB (reference only))
+                          <strong>{cleanDisplayName(sp.nodeName)}</strong> (ratio {sp.splitterRatio ?? "unknown"}, insertion loss {formatReportNumber(sp.lossDb)} dB, theoretical split {sp.idealLossDb == null ? "unknown" : `${formatReportNumber(sp.idealLossDb)} dB (reference only)`})
                         </span>
                       ))
                     : splitters.map((spNode, spIdx) => (
                         <span key={spNode.id}>
                           {spIdx > 0 ? " | " : ""}
-                          <strong>{cleanDisplayName(spNode.name)}</strong> (ratio {configuredProperty(spNode, "splitterRatio") ?? "1:8"}, actual insertion loss {formatReportNumber(spNode.properties.splitterLossDb as number) ?? "10.00"} dB)
+                          <strong>{cleanDisplayName(spNode.name)}</strong> (ratio {configuredProperty(spNode, "splitterRatio") ?? "unknown"}, insertion loss {formatReportNumber(typeof spNode.properties.splitterLossDb === "number" ? spNode.properties.splitterLossDb : null)} dB)
                         </span>
                       ))}
                 </div>
@@ -1457,7 +1403,7 @@ export function OpticalEngineeringReport({
                     <td className="numeric"><strong>{path.lengthM != null ? `${formatReportNumber(path.lengthM)} m` : "—"}</strong></td>
                     <td className="numeric">{path.lossDb != null ? `${formatReportNumber(path.lossDb)} dB` : "—"}</td>
                     <td className="numeric">
-                      {path.txPowerDbm != null ? `${formatReportNumber(path.txPowerDbm)} dBm` : "+6.00 dBm"}
+                      {path.txPowerDbm != null ? `${formatReportNumber(path.txPowerDbm)} dBm` : "—"}
                     </td>
                     <td className="numeric">
                       <strong>{path.receivedPowerDbm != null ? `${formatReportNumber(path.receivedPowerDbm)} dBm` : "—"}</strong>
@@ -1472,15 +1418,7 @@ export function OpticalEngineeringReport({
 
               {path.standardLossDb != null && (
                 <p style={{ margin: "6px 0 0", fontSize: "8pt", color: "#475569" }}>
-                  {path.standardLossDb <= 5 ? (
-                    <>
-                      Standard compliance: Link attenuation ({formatReportNumber(path.lossDb)} dB) fully complies with ITU-T G.984 Class B+ standard limit of 28.00 dB ({formatReportNumber(28 - (path.lossDb ?? 0))} dB margin). Project baseline setting: {formatReportNumber(path.standardLossDb)} dB (variance actual − standard: {formatReportNumber(path.standardVarianceDb)} dB; applies to component baseline, not 1:64 ODN).
-                    </>
-                  ) : (
-                    <>
-                      Project standard comparison: Configured physical total: {formatReportNumber(path.lossDb)} dB · project/operator standard: {formatReportNumber(path.standardLossDb)} dB · variance (actual − standard): {formatReportNumber(path.standardVarianceDb)} dB.
-                    </>
-                  )}
+                  Project/operator standard comparison: actual physical loss {formatReportNumber(path.lossDb)} dB · configured standard {formatReportNumber(path.standardLossDb)} dB · variance (actual − standard) {formatReportNumber(path.standardVarianceDb)} dB.
                   {path.datasheetReferences?.map((d) => ` Reference: ${d.reference}`).join("")}
                   {path.fieldMeasurements?.map((m) => ` Measured: ${m.measuredAt}`).join("")}
                   {path.locationLossSummary && " Location subsets"}
@@ -1526,8 +1464,7 @@ export function OpticalEngineeringReport({
         </div>
 
         <p className="formal-paragraph">
-          The physical cable network totals 11,933.83 meters of optical cable across 125 distinct segments,
-          categorized by functional network tier.
+          Cable lengths and segment counts below are derived from the project routes and categorized by functional network tier.
         </p>
 
         <table className="report-formal-table">
@@ -1537,7 +1474,7 @@ export function OpticalEngineeringReport({
               <th style={{ width: "22%" }}>Functional Category</th>
               <th style={{ width: "10%", textAlign: "right" }}>Segments</th>
               <th style={{ width: "16%", textAlign: "right" }}>GIS Route Length (m)</th>
-              <th style={{ width: "14%", textAlign: "right" }}>Slack (10%) (m)</th>
+              <th style={{ width: "14%", textAlign: "right" }}>Slack ({cableSlackFactor == null ? "unknown" : `${formatReportNumber(configuredCableSlackPercent)}%`}) (m)</th>
               <th style={{ width: "18%", textAlign: "right" }}>Procurement Length (m)</th>
               <th style={{ width: "20%" }}>Fiber Specification</th>
             </tr>
@@ -1545,16 +1482,16 @@ export function OpticalEngineeringReport({
           <tbody>
             {cableAnalysis.byCategory.map((cat) => {
               const routeM = cat.totalLengthM ?? 0;
-              const slackM = routeM * 0.10;
-              const procM = routeM + slackM;
+              const slackM = cableSlackFactor == null ? null : routeM * cableSlackFactor;
+              const procM = slackM == null ? null : routeM + slackM;
               return (
                 <tr key={cat.category}>
                   <td><strong>{cat.categoryLabel}</strong></td>
                   <td className="numeric">{cat.cableCount}</td>
                   <td className="numeric">{cat.totalLengthM != null ? formatReportNumber(cat.totalLengthM) : "—"}</td>
-                  <td className="numeric">{cat.totalLengthM != null ? formatReportNumber(slackM) : "—"}</td>
-                  <td className="numeric">{cat.totalLengthM != null ? formatReportNumber(procM) : "—"}</td>
-                  <td>{cat.category === "feeder" ? "12-Core G.652.D" : cat.category === "distribution" ? "4/8-Core G.652.D" : "1/2-Core Drop"}</td>
+                  <td className="numeric">{cat.totalLengthM != null && slackM != null ? formatReportNumber(slackM) : "—"}</td>
+                  <td className="numeric">{cat.totalLengthM != null && procM != null ? formatReportNumber(procM) : "—"}</td>
+                  <td>As configured</td>
                 </tr>
               );
             })}
@@ -1562,17 +1499,17 @@ export function OpticalEngineeringReport({
               <td>Total Physical Cable</td>
               <td className="numeric">{cableAnalysis.cables.length}</td>
               <td className="numeric">{cableAnalysis.totalKnownLengthM != null ? formatReportNumber(cableAnalysis.totalKnownLengthM) : "—"}</td>
-              <td className="numeric">{cableAnalysis.totalKnownLengthM != null ? formatReportNumber(cableAnalysis.totalKnownLengthM * 0.10) : "—"}</td>
-              <td className="numeric">{cableAnalysis.totalKnownLengthM != null ? formatReportNumber(cableAnalysis.totalKnownLengthM * 1.10) : "—"}</td>
-              <td>All Categories (10% Slack)</td>
+              <td className="numeric">{cableAnalysis.totalKnownLengthM != null && cableSlackFactor != null ? formatReportNumber(cableAnalysis.totalKnownLengthM * cableSlackFactor) : "—"}</td>
+              <td className="numeric">{cableAnalysis.totalKnownLengthM != null && cableSlackFactor != null ? formatReportNumber(cableAnalysis.totalKnownLengthM * (1 + cableSlackFactor)) : "—"}</td>
+              <td>All categories (configured allowance)</td>
             </tr>
           </tbody>
         </table>
         <p style={{ margin: "6px 0 0", fontSize: "8pt", color: "#475569" }}>
           <strong>Route vs. Procurement Note:</strong>{" "}
           {dims.physicalRoute === "VERIFIED"
-            ? "Route lengths reflect field-verified on-site physical surveyed distances (Status: Verified). A standard 10.0% slack allowance is included for splice loops, pole transitions, building entry, and thermal expansion to determine material procurement requirements."
-            : "Route lengths reflect candidate GIS road centerline distances generated via OpenStreetMap/OSRM routing (Status: Estimated / Unverified). A standard 10.0% slack allowance is included for splice loops, pole transitions, building entry, and thermal expansion to determine material procurement requirements."}
+            ? `Route length is marked verified in the project. The configured ${cableSlackFactor == null ? "unknown" : `${formatReportNumber(configuredCableSlackPercent)}%`} cable allowance is used only for procurement estimation.`
+            : `Route geometry is not explicitly field-verified. The configured ${cableSlackFactor == null ? "unknown" : `${formatReportNumber(configuredCableSlackPercent)}%`} cable allowance is used only for procurement estimation.`}
         </p>
 
         <h3 className="formal-subsection-header" style={{ marginTop: "16px" }}>11.1 Feeder &amp; Distribution Cable Schedule</h3>
@@ -1619,8 +1556,7 @@ export function OpticalEngineeringReport({
         </div>
 
         <p className="formal-paragraph">
-          The optical splitting plan comprises 16 active PLC splitters (2 feeder splitters and 14 distribution
-          splitters) yielding a net optical split ratio of 1:64 per PON branch (1:8 primary × 1:8 secondary).
+          The table lists splitter records and configured placement for this project. No splitter is assumed at an ODC or ODP unless the topology or device configuration contains it.
         </p>
 
         <table className="report-formal-table">
@@ -1652,13 +1588,7 @@ export function OpticalEngineeringReport({
         </table>
 
         <p style={{ margin: "6px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Splitter Configuration &amp; Insertion Loss Reconciliation:</strong>
-          <br />
-          • <strong>Feeder Splitter Allocation:</strong> ODC 1 houses two 1:8 primary PLC splitters. Splitter PON 1 (Active) connects to OLT PON 1 via feeder Cable 6; Splitter PON 2 (Proposed) is logically allocated to 7 ODP branches and currently shares the ODC feeder input pending dedicated second core activation.
-          <br />
-          • <strong>Splitter Loss Reconciliation (10.00 dB vs. 10.38 dB):</strong> The mounted splitter node at ODP 2 [4c58feef] carries an explicit database property of 10.00 dB. ODP 10 [65f3967e] utilizes an integrated 1:8 splitter evaluated against the standard GPON Class B+ profile default loss of 10.38 dB (9.03 dB theoretical split + 1.35 dB excess loss).
-          <br />
-          • <strong>Splitter Node Count vs. Operational Splitters:</strong> The project database contains 16 physical splitter nodes (1 legacy disconnected 'Splitter 1', 2 feeder splitters at ODC, 13 mounted splitters at ODPs 1–9, 11–14). Together with ODP 10's integrated splitter, 16 active splitting stages (2 primary × 14 secondary) operate across the network hierarchy.
+          Splitter insertion loss comes from the actual device or configured calculation profile. A theoretical split ratio is not used as device insertion loss.
         </p>
 
         <h3 className="formal-subsection-header" style={{ marginTop: "16px" }}>12.1 Enclosure Port Capacity Audit</h3>
@@ -1694,7 +1624,7 @@ export function OpticalEngineeringReport({
           </tbody>
         </table>
         <p style={{ margin: "8px 0 0", fontSize: "8pt", color: "#475569" }}>
-          <strong>Feeder Feed Architecture Note:</strong> ODC 1 houses two 1:8 primary PLC splitters. Splitter PON 1 (Active) serves 7 ODPs (56 ONTs: ODP 2 [4c58feef], ODP 3, ODP 6, ODP 7, ODP 10 [65f3967e], ODP 12, ODP 14) connected via active feeder Cable 6. Splitter PON 2 (Proposed) serves 7 ODPs (54 ONTs: ODP 1, ODP 4, ODP 5, ODP 8, ODP 9, ODP 11, ODP 13) sharing the ODC optical input pending activation of a dedicated second feeder core from OLT 1.
+          Splitter placement and topology are taken from the project path data; no fixed feeder allocation is assumed by this report.
         </p>
       </section>
 
@@ -1741,8 +1671,8 @@ export function OpticalEngineeringReport({
                   ? `${conclusion.opticalPerformance.highestRxOnt.name} (${formatReportNumber(conclusion.opticalPerformance.highestRxOnt.rxDbm)} dBm)`
                   : "—"}
               </td>
-              <td>≤ -8.00 dBm (Overload)</td>
-              <td><strong>PASS</strong></td>
+              <td>{project.settings.opticalBudget.rxOverloadDbm == null ? "—" : `≤ ${formatReportNumber(project.settings.opticalBudget.rxOverloadDbm)} dBm`}</td>
+              <td><strong>{dims.opticalBudget}</strong></td>
             </tr>
             <tr>
               <td>Lowest Received Optical Power (Worst Case)</td>
@@ -1751,33 +1681,33 @@ export function OpticalEngineeringReport({
                   ? `${conclusion.opticalPerformance.lowestRxOnt.name} (${formatReportNumber(conclusion.opticalPerformance.lowestRxOnt.rxDbm)} dBm)`
                   : "—"}
               </td>
-              <td>≥ -27.00 dBm (Sensitivity)</td>
-              <td><strong>PASS</strong></td>
+              <td>{project.settings.opticalBudget.rxSensitivityDbm == null ? "—" : `≥ ${formatReportNumber(project.settings.opticalBudget.rxSensitivityDbm)} dBm`}</td>
+              <td><strong>{dims.opticalBudget}</strong></td>
             </tr>
             <tr>
               <td>Maximum Attenuation Margin</td>
               <td className="numeric">
-                {conclusion.opticalPerformance.highestRxOnt != null ? "10.37 dB" : "—"}
+                {maximumPathMargin == null ? "—" : `${formatReportNumber(maximumPathMargin)} dB`}
               </td>
-              <td>≥ 3.00 dB required</td>
-              <td><strong>PASS</strong></td>
+              <td>{project.settings.opticalBudget.minMarginDb == null ? "—" : `≥ ${formatReportNumber(project.settings.opticalBudget.minMarginDb)} dB required`}</td>
+              <td><strong>{dims.opticalBudget}</strong></td>
             </tr>
             <tr>
               <td>Minimum Attenuation Margin</td>
               <td className="numeric">
                 {conclusion.opticalPerformance.lowestSensitivityMarginOnt != null
                   ? `${formatReportNumber(conclusion.opticalPerformance.lowestSensitivityMarginOnt.marginDb)} dB`
-                  : "10.14 dB"}
+                  : "—"}
               </td>
-              <td>≥ 3.00 dB required</td>
-              <td><strong>PASS</strong></td>
+              <td>{project.settings.opticalBudget.minMarginDb == null ? "—" : `≥ ${formatReportNumber(project.settings.opticalBudget.minMarginDb)} dB required`}</td>
+              <td><strong>{dims.opticalBudget}</strong></td>
             </tr>
             <tr>
               <td>Longest Cable Route Segment</td>
               <td className="numeric" colSpan={2}>
                 {conclusion.infrastructure.longestCable != null
                   ? `${conclusion.infrastructure.longestCable.name} (${formatReportNumber(conclusion.infrastructure.longestCable.lengthM)} m · ${conclusion.infrastructure.longestCable.categoryLabel})`
-                  : "Cable 6 (1,120.08 m · Feeder)"}
+                  : "—"}
               </td>
               <td>{dims.physicalRoute === "VERIFIED" ? "Field-verified route (Verified)" : "Desktop GIS route (Unverified)"}</td>
             </tr>

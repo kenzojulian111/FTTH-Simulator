@@ -30,7 +30,13 @@ function categoryLabel(item: ConstructionCostResult["items"][number]): string {
   return "Other";
 }
 
+function lineItemSubtotal(result: ConstructionCostResult, category: "material" | "installation" | "other"): number {
+  return result.items.reduce((total, item) => categoryLabel(item).toLowerCase() === category ? total + item.amount : total, 0);
+}
+
 function resolveRateStatus(item: ConstructionCostResult["items"][number]): string {
+  if (item.unitCostSource === "legacy_illustrative") return "Legacy Illustrative";
+  if (item.unitCostSource !== "configured") return "Unknown";
   if (item.rateStatus) return item.rateStatus;
   if (item.unitCostSource === "configured") {
     const ref = (item.unitCostReference || "").toLowerCase();
@@ -38,7 +44,7 @@ function resolveRateStatus(item: ConstructionCostResult["items"][number]): strin
     if (ref.includes("hist") || ref.includes("past")) return "Historical Rate";
     return "Planning Estimate";
   }
-  return "Planning Estimate";
+  return "Unknown";
 }
 
 export function RabReport({ projectName, result, loading, error, onBack, routerCount = 0, project }: Props) {
@@ -53,38 +59,49 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
       ? (result.summary.poleStatusCounts as Record<string, unknown>)
       : {};
 
-  const grandTotal = result ? (result.grandTotal ?? result.totalCapex ?? result.totalAmount ?? 0) : 0;
+  const grandTotal = result?.grandTotal ?? result?.totalCapex ?? result?.totalAmount ?? null;
   const matSubtotal = result ? subtotal(result, "material") : 0;
   const instSubtotal = result ? subtotal(result, "installation") : 0;
   const otherSubtotal = result ? subtotal(result, "other") : 0;
 
-  const matPercent = grandTotal > 0 ? (matSubtotal / grandTotal) * 100 : 0;
-  const instPercent = grandTotal > 0 ? (instSubtotal / grandTotal) * 100 : 0;
-  const otherPercent = grandTotal > 0 ? (otherSubtotal / grandTotal) * 100 : 0;
+  const matPercent = grandTotal != null && grandTotal > 0 ? (matSubtotal / grandTotal) * 100 : null;
+  const instPercent = grandTotal != null && grandTotal > 0 ? (instSubtotal / grandTotal) * 100 : null;
+  const otherPercent = grandTotal != null && grandTotal > 0 ? (otherSubtotal / grandTotal) * 100 : null;
 
   const materialItems = result ? result.items.filter((item) => categoryLabel(item) === "Material") : [];
   const installationItems = result ? result.items.filter((item) => categoryLabel(item) === "Installation") : [];
+  const lineMaterialSubtotal = result ? lineItemSubtotal(result, "material") : 0;
+  const lineInstallationSubtotal = result ? lineItemSubtotal(result, "installation") : 0;
+  const lineItemsTotal = result ? result.items.reduce((total, item) => total + item.amount, 0) : 0;
 
   const exportDateDisplay = result?.calculatedAt ? formatReportDate(result.calculatedAt) : "—";
 
   // Semantic Customer Metrics
-  const plannedCustomers = result?.plannedCustomerCount ?? (project?.customers.length ?? (typeof result?.summary?.plannedCustomerCount === "number" ? result.summary.plannedCustomerCount : 110));
-  const assignedOnts = result?.assignedOntCount ?? (typeof result?.summary?.assignedOntCount === "number" ? result.summary.assignedOntCount : (project?.customers.filter((c) => c.ontNodeId).length ?? 110));
-  const connectedCustomers = result?.connectedCustomerCount ?? 0;
-  const costPerPlannedCustomer = result?.costPerPlannedCustomer ?? (plannedCustomers > 0 ? grandTotal / plannedCustomers : null);
+  const plannedCustomers = result?.plannedCustomerCount ?? (project?.customers.length ?? (typeof result?.summary?.plannedCustomerCount === "number" ? result.summary.plannedCustomerCount : null));
+  const assignedOnts = result?.assignedOntCount ?? (typeof result?.summary?.assignedOntCount === "number" ? result.summary.assignedOntCount : (project ? project.customers.filter((c) => c.ontNodeId).length : null));
+  const connectedCustomers = result?.connectedCustomerCount ?? (typeof result?.summary?.connectedCustomerCount === "number" ? result.summary.connectedCustomerCount : null);
+  const costPerPlannedCustomer = result?.costPerPlannedCustomer ?? (plannedCustomers != null && plannedCustomers > 0 && grandTotal != null ? grandTotal / plannedCustomers : null);
 
   // Equipment breakdown values
-  const oltCount = typeof result?.summary?.oltCount === "number" ? result.summary.oltCount : 1;
-  const odcCount = typeof result?.summary?.odcCount === "number" ? result.summary.odcCount : 1;
-  const odpCount = typeof result?.summary?.odpCount === "number" ? result.summary.odpCount : 14;
-  const ontCount = typeof result?.summary?.ontCount === "number" ? result.summary.ontCount : 110;
-  const splitterProcurementCount = typeof result?.summary?.splitterCount === "number" ? result.summary.splitterCount : 16;
-  const activeSplitterCount = typeof result?.summary?.activeSplitterCount === "number" ? result.summary.activeSplitterCount : 16;
+  const countFrom = (type: string, key: string) => typeof result?.summary?.[key] === "number"
+    ? result.summary[key] as number
+    : project ? project.nodes.filter((node) => node.type === type).length : null;
+  const oltCount = countFrom("olt", "oltCount");
+  const odcCount = countFrom("odc", "odcCount");
+  const odpCount = countFrom("odp", "odpCount");
+  const ontCount = countFrom("ont", "ontCount");
+  const splitterProcurementCount = countFrom("splitter", "splitterCount");
+  const activeSplitterCount = countFrom("splitter", "activeSplitterCount");
 
-  const splSupplyItem = result?.items.find((i) => i.code === "SPL-SUPPLY" || (i.code.startsWith("SPL") && (i.category === "material" || i.code.endsWith("-MAT") || i.code.endsWith("-SUPPLY"))));
-  const splInstallItem = result?.items.find((i) => i.code === "SPL-INSTALL" || (i.code.startsWith("SPL") && (i.category === "installation" || i.code.endsWith("-INST") || i.code.endsWith("-INSTALL"))));
-  const splSupplyAmount = splSupplyItem?.amount ?? (splitterProcurementCount * 120000);
-  const splInstallAmount = splInstallItem?.amount ?? (splitterProcurementCount * 50000);
+  const poleCostLine = (status: string, kind: "SUPPLY" | "INSTALL") => result?.items.find((item) => item.code === `POLE-${kind}-${status.toUpperCase()}` || (status === "legacy" && item.code === `POLE-${kind}`));
+  const proposedPoleSupply = poleCostLine("proposed", "SUPPLY");
+  const proposedPoleInstall = poleCostLine("proposed", "INSTALL");
+  const poleCostDisplay = (status: "existing" | "proposed" | "shared" | "unverified", kind: "SUPPLY" | "INSTALL") => {
+    const item = poleCostLine(status, kind);
+    if (item) return formatReportCurrency(item.amount, result?.currency ?? "IDR");
+    return project?.settings.constructionCost.poleCostPolicy?.[status] === "exclude" ? "Excluded by policy" : "—";
+  };
+  const countDisplay = (value: number | null | undefined) => value == null ? "—" : formatReportNumber(value);
 
   return (
     <article className="formal-telecom-report formal-rab-report engineering-report rab-report">
@@ -134,9 +151,9 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                 <tbody>
                   <tr>
                     <th>Document Reference:</th>
-                    <td>RAB-FTTH-2026-001</td>
+                    <td>{`RAB-${result.projectId}`}</td>
                     <th>Document Status:</th>
-                    <td><strong>Revised Preliminary Cost Estimate (Rev 1.1)</strong></td>
+                    <td><strong>{result.complete ? "Preliminary estimate complete" : "Preliminary estimate incomplete"}</strong></td>
                   </tr>
                   <tr>
                     <th>Dokumen Anggaran:</th>
@@ -148,7 +165,7 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                     <th>Mata Uang Acuan:</th>
                     <td>{result.currency ? `${result.currency} (Rp)` : "IDR (Rp)"}</td>
                     <th>Total Estimasi CAPEX:</th>
-                    <td><strong>{formatReportCurrency(grandTotal, result.currency)}</strong></td>
+                    <td><strong>{grandTotal == null ? "—" : formatReportCurrency(grandTotal, result.currency)}</strong></td>
                   </tr>
                   <tr>
                     <th>Status Kelayakan Biaya:</th>
@@ -212,20 +229,20 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                   <td>1</td>
                   <td><strong>Pengadaan Perangkat &amp; Material (Material Procurement Subtotal)</strong></td>
                   <td className="numeric"><strong>{formatReportCurrency(matSubtotal, result.currency)}</strong></td>
-                  <td className="numeric">{matPercent.toFixed(2)}%</td>
+                  <td className="numeric">{matPercent == null ? "—" : `${matPercent.toFixed(2)}%`}</td>
                 </tr>
                 <tr>
                   <td>2</td>
                   <td><strong>Jasa Pemasangan &amp; Konstruksi (Installation &amp; Labor Subtotal)</strong></td>
                   <td className="numeric"><strong>{formatReportCurrency(instSubtotal, result.currency)}</strong></td>
-                  <td className="numeric">{instPercent.toFixed(2)}%</td>
+                  <td className="numeric">{instPercent == null ? "—" : `${instPercent.toFixed(2)}%`}</td>
                 </tr>
                 {otherSubtotal > 0 && (
                   <tr>
                     <td>3</td>
                     <td><strong>Pekerjaan Lain-lain (Other Items Subtotal)</strong></td>
                     <td className="numeric"><strong>{formatReportCurrency(otherSubtotal, result.currency)}</strong></td>
-                    <td className="numeric">{otherPercent.toFixed(2)}%</td>
+                  <td className="numeric">{otherPercent == null ? "—" : `${otherPercent.toFixed(2)}%`}</td>
                   </tr>
                 )}
               </tbody>
@@ -250,7 +267,7 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
 
             <p className="formal-paragraph">
               Perbedaan semantik antara pelanggan terencana (planned), penugasan perangkat ONT (assigned), dan pelanggan aktif terhubung (connected) disajikan secara transparan di bawah ini.
-              Dalam fase perencanaan konstruksi sebelum komisioning jaringan, seluruh 110 pelanggan berada dalam status <em>planned</em> dengan penugasan ONT 100%:
+              Status dan jumlah pelanggan berasal dari data proyek dan hasil kalkulasi yang tersedia:
             </p>
 
             <table className="report-formal-table">
@@ -271,14 +288,14 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                 <tr>
                   <td><strong>Assigned ONTs (ONT Ditugaskan)</strong></td>
                   <td className="numeric"><strong>{assignedOnts}</strong></td>
-                  <td>Pelanggan yang telah memiliki alokasi terminal ONT dan port drop aktif (100% assignment)</td>
+                  <td>Pelanggan dengan alokasi ONT yang tercatat pada model proyek.</td>
                 </tr>
                 <tr>
                   <td><strong>Connected Customers (Pelanggan Aktif Terhubung)</strong></td>
                   <td className="numeric">
                     <strong>{connectedCustomers}</strong>
                   </td>
-                  <td>Pelanggan dengan status aktif operasional (0 pada fase pra-konstruksi/perencanaan)</td>
+                  <td>Pelanggan dengan status aktif operasional yang tercatat pada hasil kalkulasi.</td>
                 </tr>
                 <tr style={{ background: "#f1f5f9" }}>
                   <td><strong>Estimated CAPEX per Planned Customer</strong></td>
@@ -294,14 +311,14 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                 <tr>
                   <td>Cost per Connected Customer</td>
                   <td className="numeric">
-                    {connectedCustomers > 0 && result.costPerConnectedCustomer != null
+                    {connectedCustomers != null && connectedCustomers > 0 && result.costPerConnectedCustomer != null
                       ? formatReportCurrency(result.costPerConnectedCustomer, result.currency)
                       : "N/A"}
                   </td>
                   <td>
-                    {connectedCustomers > 0
+                    {connectedCustomers != null && connectedCustomers > 0
                       ? "Berdasarkan pelanggan aktif"
-                      : "N/A · Proyek berada pada tahap pra-konstruksi; belum ada pelanggan berstatus active connected."}
+                      : "N/A · Tidak ada pelanggan connected yang tercatat."}
                   </td>
                 </tr>
               </tbody>
@@ -353,57 +370,56 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
               <tbody>
                 <tr>
                   <td><strong>Optical Line Terminal (OLT)</strong></td>
-                  <td className="numeric">1</td>
-                  <td className="numeric">1</td>
+                  <td className="numeric">{countDisplay(oltCount)}</td>
+                  <td className="numeric">{countDisplay(oltCount)}</td>
                   <td className="numeric">{oltCount}</td>
-                  <td className="numeric">0</td>
-                  <td>Huawei MA5800-X7 chassis dengan 2 active PON ports (PON 1 &amp; PON 2)</td>
+                  <td className="numeric">—</td>
+                  <td>Spesifikasi perangkat hanya tersedia jika dikonfigurasi pada proyek.</td>
                 </tr>
                 <tr>
                   <td><strong>Optical Distribution Cabinet (ODC)</strong></td>
-                  <td className="numeric">1</td>
-                  <td className="numeric">1</td>
+                  <td className="numeric">{countDisplay(odcCount)}</td>
+                  <td className="numeric">{countDisplay(odcCount)}</td>
                   <td className="numeric">{odcCount}</td>
-                  <td className="numeric">0</td>
-                  <td>FiberHome ODC-F288 melayani 14 cabang kabel distribusi</td>
+                  <td className="numeric">—</td>
+                  <td>Jumlah mengikuti objek proyek; model perangkat tidak diasumsikan.</td>
                 </tr>
                 <tr>
                   <td><strong>Optical Distribution Point (ODP)</strong></td>
-                  <td className="numeric">14</td>
-                  <td className="numeric">14</td>
+                  <td className="numeric">{countDisplay(odpCount)}</td>
+                  <td className="numeric">{countDisplay(odpCount)}</td>
                   <td className="numeric">{odpCount}</td>
-                  <td className="numeric">0</td>
-                  <td>14 enclosure akses luar ruang (112 gross drop port, 110 port terhubung)</td>
+                  <td className="numeric">—</td>
+                  <td>Jumlah mengikuti objek proyek; kapasitas port tidak diasumsikan.</td>
                 </tr>
                 <tr>
-                  <td><strong>Optical PLC Splitter (1:8)</strong></td>
-                  <td className="numeric">16</td>
+                  <td><strong>Optical Splitter</strong></td>
+                  <td className="numeric">{countDisplay(activeSplitterCount)}</td>
                   <td className="numeric">{activeSplitterCount}</td>
                   <td className="numeric">{splitterProcurementCount}</td>
-                  <td className="numeric">{splitterProcurementCount - activeSplitterCount}</td>
+                  <td className="numeric">{splitterProcurementCount == null || activeSplitterCount == null ? "—" : splitterProcurementCount - activeSplitterCount}</td>
                   <td>
-                    <strong>Rekonsiliasi Pengadaan Terverifikasi:</strong> 16 unit splitter fisik diperlukan (2 feeder di ODC 1 + 14 access di ODP 1–14).
-                    13 deklarasi properti ODP telah diselaraskan dengan splitter internal (tidak dihitung ganda), dan 1 splitter legacy terputus dikecualikan dari pengadaan baru.
+                    Rekonsiliasi splitter mengikuti node dan konfigurasi enclosure pada proyek. Rincian deduplikasi tersedia pada asumsi backend.
                   </td>
                 </tr>
                 <tr>
                   <td><strong>Optical Network Terminal (ONT)</strong></td>
-                  <td className="numeric">110</td>
-                  <td className="numeric">110</td>
+                  <td className="numeric">{countDisplay(ontCount)}</td>
+                  <td className="numeric">{countDisplay(ontCount)}</td>
                   <td className="numeric">{ontCount}</td>
-                  <td className="numeric">0</td>
-                  <td>110 unit terminal pelanggan GPON dialokasikan 1:1 ke seluruh pelanggan</td>
+                  <td className="numeric">—</td>
+                  <td>Jumlah mengikuti objek ONT dalam proyek.</td>
                 </tr>
                 <tr>
                   <td><strong>Tiang Penyangga (Poles)</strong></td>
-                  <td className="numeric">9</td>
-                  <td className="numeric">9</td>
-                  <td className="numeric">4</td>
-                  <td className="numeric">-5</td>
+                  <td className="numeric">{countDisplay(typeof result.summary?.poleCount === "number" ? result.summary.poleCount : null)}</td>
+                  <td className="numeric">{countDisplay(typeof result.summary?.poleCount === "number" ? result.summary.poleCount : null)}</td>
+                  <td className="numeric">{countDisplay(typeof poleStatusCounts.proposed === "number" ? poleStatusCounts.proposed : null)}</td>
+                  <td className="numeric">—</td>
                   <td>
-                    {Number(poleStatusCounts.unverified ?? 0) === 0
-                      ? `Hanya 4 tiang baru (proposed) yang dibebankan; ${String(poleStatusCounts.existing ?? 2)} existing dan ${String(poleStatusCounts.shared ?? 3)} shared dikecualikan dari CAPEX pengadaan (100% tiang terverifikasi)`
-                      : "Hanya 4 tiang baru (proposed) yang dibebankan; 1 existing, 3 shared, dan 1 unverified dikecualikan dari CAPEX pengadaan"}
+                    {poleStatusCounts.unverified === 0
+                      ? `Kebijakan biaya tercatat untuk ${String(poleStatusCounts.proposed ?? "—")} tiang proposed; status lain mengikuti konfigurasi proyek.`
+                      : "Status tiang yang belum diverifikasi ditandai; biaya mengikuti kebijakan konfigurasi."}
                   </td>
                 </tr>
               </tbody>
@@ -420,8 +436,7 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
             </div>
 
             <p className="formal-paragraph">
-              Panjang kabel dihitung secara akurat dari geometri rute fisik jalan dengan penambahan faktor cadangan kelonggaran (slack allowance) sebesar 10%
-              untuk tarikan tiang, gulungan cadangan (spare loop), penurunan tiang, dan terminasi baki sambung:
+              Panjang pengadaan berasal dari kuantitas hasil backend. Persentase slack yang digunakan ditampilkan dari konfigurasi hasil kalkulasi:
             </p>
 
             {cableAudit.length > 0 && (
@@ -452,9 +467,9 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                     <tr>
                       <th>Total Jaringan Kabel</th>
                       <td className="numeric"><strong>{typeof result.summary?.totalCableRouteMeters === "number" ? `${formatReportNumber(result.summary.totalCableRouteMeters)} m` : "—"}</strong></td>
-                      <td className="numeric">10%</td>
+                      <td className="numeric">{typeof result.summary?.cableSlackPercent === "number" ? `${formatReportNumber(result.summary.cableSlackPercent)}%` : "—"}</td>
                       <td className="numeric"><strong>{typeof result.summary?.totalCableBilledMeters === "number" ? `${formatReportNumber(result.summary.totalCableBilledMeters)} m` : "—"}</strong></td>
-                      <td>125 segmen total</td>
+                      <td>{cableAudit.reduce((sum, row) => sum + (Array.isArray(row.cableSegmentIds) ? row.cableSegmentIds.length : 0), 0)} segmen tercatat</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -485,13 +500,13 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                   <tbody>
                     {deploymentAudit.map((row, idx) => {
                       const pLen = typeof row.physicalLengthM === "number" ? row.physicalLengthM : 0;
-                      const totLen = typeof result.summary?.totalCableRouteMeters === "number" ? result.summary.totalCableRouteMeters : 11933.83;
-                      const pct = totLen > 0 ? (pLen / totLen) * 100 : 0;
+                      const totLen = typeof result.summary?.totalCableRouteMeters === "number" ? result.summary.totalCableRouteMeters : null;
+                      const pct = totLen != null && totLen > 0 ? (pLen / totLen) * 100 : null;
                       return (
                         <tr key={idx}>
                           <td><strong>{String(row.deploymentMethod ?? "unspecified").toUpperCase()}</strong></td>
                           <td className="numeric">{formatReportNumber(pLen)} m</td>
-                          <td className="numeric">{pct.toFixed(2)}%</td>
+                          <td className="numeric">{pct == null ? "—" : `${pct.toFixed(2)}%`}</td>
                           <td>
                             {String(row.deploymentMethod).toLowerCase() === "aerial"
                               ? "Penggelaran kabel udara pada tiang eksisting, tiang bersama, dan tiang baru."
@@ -527,52 +542,50 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                   <th>Status Tiang</th>
                   <th style={{ textAlign: "right" }}>Jumlah Tiang</th>
                   <th>Kebijakan Pembiayaan CAPEX</th>
-                  <th style={{ textAlign: "right" }}>Biaya Pengadaan (Rp)</th>
-                  <th style={{ textAlign: "right" }}>Biaya Pemasangan (Rp)</th>
+                  <th style={{ textAlign: "right" }}>Subtotal Pengadaan (Rp)</th>
+                  <th style={{ textAlign: "right" }}>Subtotal Pemasangan (Rp)</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td><strong>Proposed (Tiang Baru)</strong></td>
-                  <td className="numeric"><strong>{String(poleStatusCounts.proposed ?? 4)}</strong></td>
-                  <td>Dibebankan penuh (Supply &amp; Install)</td>
-                  <td className="numeric">Rp 3.400.000</td>
-                  <td className="numeric">Rp 1.400.000</td>
+                  <td className="numeric"><strong>{countDisplay(typeof poleStatusCounts.proposed === "number" ? poleStatusCounts.proposed : null)}</strong></td>
+                  <td>{project?.settings.constructionCost.poleCostPolicy?.proposed ?? "—"}</td>
+                  <td className="numeric">{proposedPoleSupply ? formatReportCurrency(proposedPoleSupply.amount, result.currency) : "—"}</td>
+                  <td className="numeric">{proposedPoleInstall ? formatReportCurrency(proposedPoleInstall.amount, result.currency) : "—"}</td>
                 </tr>
                 <tr>
                   <td><strong>Existing (Tiang Eksisting)</strong></td>
-                  <td className="numeric">{String(poleStatusCounts.existing ?? 1)}</td>
-                  <td>Dikecualikan dari CAPEX (Aset eksisting operator)</td>
-                  <td className="numeric">Rp 0</td>
-                  <td className="numeric">Rp 0</td>
+                  <td className="numeric">{countDisplay(typeof poleStatusCounts.existing === "number" ? poleStatusCounts.existing : null)}</td>
+                  <td>{project?.settings.constructionCost.poleCostPolicy?.existing ?? "—"}</td>
+                  <td className="numeric">{poleCostDisplay("existing", "SUPPLY")}</td>
+                  <td className="numeric">{poleCostDisplay("existing", "INSTALL")}</td>
                 </tr>
                 <tr>
                   <td><strong>Shared (Tiang Bersama / PLN)</strong></td>
-                  <td className="numeric">{String(poleStatusCounts.shared ?? 3)}</td>
-                  <td>Dikecualikan dari CAPEX pengadaan aset baru</td>
-                  <td className="numeric">Rp 0</td>
-                  <td className="numeric">Rp 0</td>
+                  <td className="numeric">{countDisplay(typeof poleStatusCounts.shared === "number" ? poleStatusCounts.shared : null)}</td>
+                  <td>{project?.settings.constructionCost.poleCostPolicy?.shared ?? "—"}</td>
+                  <td className="numeric">{poleCostDisplay("shared", "SUPPLY")}</td>
+                  <td className="numeric">{poleCostDisplay("shared", "INSTALL")}</td>
                 </tr>
                 <tr>
                   <td><strong>Unverified (Belum Terverifikasi)</strong></td>
-                  <td className="numeric">{String(poleStatusCounts.unverified ?? 0)}</td>
+                  <td className="numeric">{countDisplay(typeof poleStatusCounts.unverified === "number" ? poleStatusCounts.unverified : null)}</td>
                   <td>
-                    {Number(poleStatusCounts.unverified ?? 0) === 0
-                      ? "Seluruh tiang telah terverifikasi lapangan (0 tiang unverified)"
+                    {poleStatusCounts.unverified === 0
+                      ? "Status unverified tercatat nol pada hasil kalkulasi."
                       : "Dikecualikan sementara; menunggu verifikasi kelayakan fisik lapangan"}
                   </td>
-                  <td className="numeric">Rp 0</td>
-                  <td className="numeric">Rp 0</td>
+                  <td className="numeric">{poleCostDisplay("unverified", "SUPPLY")}</td>
+                  <td className="numeric">{poleCostDisplay("unverified", "INSTALL")}</td>
                 </tr>
               </tbody>
               <tfoot>
                 <tr>
                   <th>Total Aset Tiang</th>
-                  <td className="numeric"><strong>9</strong></td>
+                  <td className="numeric"><strong>{countDisplay(typeof result.summary?.poleCount === "number" ? result.summary.poleCount : null)}</strong></td>
                   <td colSpan={3}>
-                    {Number(poleStatusCounts.unverified ?? 0) === 0
-                      ? `Diverifikasi deduplikasi per stable pole ID (${String(poleStatusCounts.proposed ?? 4)} proposed, ${String(poleStatusCounts.existing ?? 2)} existing, ${String(poleStatusCounts.shared ?? 3)} shared, 0 unverified)`
-                      : `Diverifikasi deduplikasi per stable pole ID (${String(poleStatusCounts.proposed ?? 4)} proposed, ${String(poleStatusCounts.existing ?? 1)} existing, ${String(poleStatusCounts.shared ?? 3)} shared, ${String(poleStatusCounts.unverified ?? 1)} unverified)`}
+                    Jumlah dihitung per ID tiang unik; status ditampilkan dari ringkasan hasil backend.
                   </td>
                 </tr>
               </tfoot>
@@ -594,7 +607,7 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
             </div>
 
             <p className="formal-paragraph">
-              Rincian seluruh 18 item belanja modal (CAPEX) beserta kuantitas tertagih, satuan, harga satuan, klasifikasi status tarif (Rate Status), dan jumlah harga lini:
+              Rincian item belanja modal yang dikembalikan backend beserta kuantitas, satuan, status tarif, dan jumlah lini:
             </p>
 
             <div className="report-table-wrap">
@@ -786,64 +799,27 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                   <th>Perangkat</th>
                   <th style={{ textAlign: "right" }}>Jumlah</th>
                   <th>Satuan</th>
-                  <th style={{ textAlign: "right" }}>Biaya Supply (Rp)</th>
-                  <th style={{ textAlign: "right" }}>Biaya Install (Rp)</th>
+                  <th style={{ textAlign: "right" }}>Harga Satuan Supply (Rp)</th>
+                  <th style={{ textAlign: "right" }}>Harga Satuan Install (Rp)</th>
                   <th style={{ textAlign: "right" }}>Total Investasi (Rp)</th>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td>OLT Chassis &amp; SFP Modules</td>
-                  <td className="numeric">1</td>
-                  <td>unit</td>
-                  <td className="numeric">Rp 25.000.000</td>
-                  <td className="numeric">Rp 3.000.000</td>
-                  <td className="numeric"><strong>Rp 28.000.000</strong></td>
-                </tr>
-                <tr>
-                  <td>ODC Outdoor Cabinet</td>
-                  <td className="numeric">1</td>
-                  <td>unit</td>
-                  <td className="numeric">Rp 4.500.000</td>
-                  <td className="numeric">Rp 1.200.000</td>
-                  <td className="numeric"><strong>Rp 5.700.000</strong></td>
-                </tr>
-                <tr>
-                  <td>ODP Enclosures</td>
-                  <td className="numeric">14</td>
-                  <td>unit</td>
-                  <td className="numeric">Rp 4.900.000</td>
-                  <td className="numeric">Rp 2.100.000</td>
-                  <td className="numeric"><strong>Rp 7.000.000</strong></td>
-                </tr>
-                <tr>
-                  <td>Optical PLC Splitters (1:8)</td>
-                  <td className="numeric">{splitterProcurementCount}</td>
-                  <td>piece</td>
-                  <td className="numeric">{formatReportCurrency(splSupplyAmount, result.currency)}</td>
-                  <td className="numeric">{formatReportCurrency(splInstallAmount, result.currency)}</td>
-                  <td className="numeric"><strong>{formatReportCurrency(splSupplyAmount + splInstallAmount, result.currency)}</strong></td>
-                </tr>
-                <tr>
-                  <td>ONT Subscriber Terminals</td>
-                  <td className="numeric">110</td>
-                  <td>unit</td>
-                  <td className="numeric">Rp 27.500.000</td>
-                  <td className="numeric">Rp 11.000.000</td>
-                  <td className="numeric"><strong>Rp 38.500.000</strong></td>
-                </tr>
+                {result.items.map((item, index) => (
+                  <tr key={`${item.code}-${index}`}>
+                    <td>{item.description || item.code}</td>
+                    <td className="numeric">{formatReportNumber(item.quantity)}</td>
+                    <td>{item.unit || "—"}</td>
+                    <td className="numeric">{categoryLabel(item) === "Material" ? formatReportCurrency(item.unitCost, result.currency) : "—"}</td>
+                    <td className="numeric">{categoryLabel(item) === "Installation" ? formatReportCurrency(item.unitCost, result.currency) : "—"}</td>
+                    <td className="numeric"><strong>{formatReportCurrency(item.amount, result.currency)}</strong></td>
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr>
                   <th colSpan={5} style={{ textAlign: "right" }}>Total Investasi Perangkat Jaringan</th>
-                  <td className="numeric">
-                    <strong>
-                      {formatReportCurrency(
-                        28000000 + 5700000 + 7000000 + (splSupplyAmount + splInstallAmount) + 38500000,
-                        result.currency
-                      )}
-                    </strong>
-                  </td>
+                  <td className="numeric"><strong>{grandTotal == null ? "—" : formatReportCurrency(grandTotal, result.currency)}</strong></td>
                 </tr>
               </tfoot>
             </table>
@@ -875,25 +851,31 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
               <tbody>
                 <tr>
                   <td><strong>Planning Estimate</strong></td>
-                  <td className="numeric">18</td>
-                  <td>Tarif acuan estimasi perencanaan teknis (default engineering planning benchmark)</td>
+                  <td className="numeric">{result.items.filter((item) => resolveRateStatus(item) === "Planning Estimate").length}</td>
+                  <td>Item dengan sumber tarif perencanaan yang tercatat.</td>
                   <td>Preliminary / Baseline</td>
                 </tr>
                 <tr>
                   <td><strong>Verified Quotation</strong></td>
-                  <td className="numeric">0</td>
+                  <td className="numeric">{result.items.filter((item) => resolveRateStatus(item) === "Verified Quotation").length}</td>
                   <td>Penawaran harga resmi dari vendor atau distributor perangkat bersertifikat</td>
                   <td>High / Commercial</td>
                 </tr>
                 <tr>
                   <td><strong>Historical Rate</strong></td>
-                  <td className="numeric">0</td>
-                  <td>Data harga kontrak pekerjaan konstruksi FTTH sejenis pada periode sebelumnya</td>
+                  <td className="numeric">{result.items.filter((item) => resolveRateStatus(item) === "Historical Rate").length}</td>
+                  <td>Tarif historis berdasarkan provenance item.</td>
                   <td>Medium-High</td>
                 </tr>
                 <tr>
+                  <td><strong>Legacy Illustrative</strong></td>
+                  <td className="numeric">{result.items.filter((item) => resolveRateStatus(item) === "Legacy Illustrative").length}</td>
+                  <td>Nilai lama untuk kompatibilitas; bukan quotation atau tarif terverifikasi.</td>
+                  <td>Illustrative only</td>
+                </tr>
+                <tr>
                   <td><strong>Unpriced / Unknown</strong></td>
-                  <td className="numeric">0</td>
+                  <td className="numeric">{(result.incompleteItems?.length ?? 0) + result.items.filter((item) => resolveRateStatus(item) === "Unknown").length}</td>
                   <td>Item pekerjaan tanpa tarif satuan (dikecualikan dari priced subtotal)</td>
                   <td>Pending Quotation</td>
                 </tr>
@@ -917,7 +899,7 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
                   <tr>
                     <td style={{ width: "35%" }}><code>L_billed = L_physical × (1 + slack)</code></td>
                     <td className="equation-detail">
-                      Panjang kabel tertagih mencakup panjang rute geometris fisik lapangan ditambah cadangan slack 10% untuk tekukan, gulungan tiang, dan sambungan baki.
+                      Panjang tertagih = panjang fisik × (1 + slack terkonfigurasi); slack aktual dicantumkan pada audit kuantitas kabel.
                     </td>
                   </tr>
                   <tr>
@@ -947,7 +929,7 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
             </div>
 
             <p className="formal-paragraph">
-              Verifikasi audit membuktikan bahwa tidak terdapat selisih aritmatika antara nilai lini, subtotal kategori, dan grand total belanja modal:
+              Jumlah lini dihitung ulang secara terpisah dari nilai ringkasan backend untuk mengungkap selisih aritmatika:
             </p>
 
             <table className="report-formal-table">
@@ -963,21 +945,21 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
               <tbody>
                 <tr>
                   <td>Penjumlahan Lini Material ({materialItems.length} item)</td>
-                  <td className="numeric">{formatReportCurrency(matSubtotal, result.currency)}</td>
-                  <td className="numeric">{formatReportCurrency(result.materialSubtotal ?? matSubtotal, result.currency)}</td>
-                  <td><strong className="status-text-pass">100% MATCH (0,00 Variance)</strong></td>
+                  <td className="numeric">{formatReportCurrency(lineMaterialSubtotal, result.currency)}</td>
+                  <td className="numeric">{formatReportCurrency(result.materialSubtotal, result.currency)}</td>
+                  <td><strong className={result.materialSubtotal == null ? "" : Math.abs(lineMaterialSubtotal - result.materialSubtotal) < 0.001 ? "status-text-pass" : "status-text-fail"}>{result.materialSubtotal == null ? "UNKNOWN" : Math.abs(lineMaterialSubtotal - result.materialSubtotal) < 0.001 ? "MATCH" : `VARIANCE ${formatReportCurrency(lineMaterialSubtotal - result.materialSubtotal, result.currency)}`}</strong></td>
                 </tr>
                 <tr>
                   <td>Penjumlahan Lini Jasa Instalasi ({installationItems.length} item)</td>
-                  <td className="numeric">{formatReportCurrency(instSubtotal, result.currency)}</td>
-                  <td className="numeric">{formatReportCurrency(result.installationSubtotal ?? instSubtotal, result.currency)}</td>
-                  <td><strong className="status-text-pass">100% MATCH (0,00 Variance)</strong></td>
+                  <td className="numeric">{formatReportCurrency(lineInstallationSubtotal, result.currency)}</td>
+                  <td className="numeric">{formatReportCurrency(result.installationSubtotal, result.currency)}</td>
+                  <td><strong className={result.installationSubtotal == null ? "" : Math.abs(lineInstallationSubtotal - result.installationSubtotal) < 0.001 ? "status-text-pass" : "status-text-fail"}>{result.installationSubtotal == null ? "UNKNOWN" : Math.abs(lineInstallationSubtotal - result.installationSubtotal) < 0.001 ? "MATCH" : `VARIANCE ${formatReportCurrency(lineInstallationSubtotal - result.installationSubtotal, result.currency)}`}</strong></td>
                 </tr>
                 <tr>
                   <td>Grand Total Belanja Modal (CAPEX)</td>
-                  <td className="numeric">{formatReportCurrency(grandTotal, result.currency)}</td>
+                  <td className="numeric">{formatReportCurrency(lineItemsTotal, result.currency)}</td>
                   <td className="numeric">{formatReportCurrency(result.grandTotal ?? grandTotal, result.currency)}</td>
-                  <td><strong className="status-text-pass">100% MATCH (0,00 Variance)</strong></td>
+                  <td><strong className={grandTotal == null ? "" : Math.abs(lineItemsTotal - grandTotal) < 0.001 ? "status-text-pass" : "status-text-fail"}>{grandTotal == null ? "UNKNOWN" : Math.abs(lineItemsTotal - grandTotal) < 0.001 ? "MATCH" : `VARIANCE ${formatReportCurrency(lineItemsTotal - grandTotal, result.currency)}`}</strong></td>
                 </tr>
               </tbody>
             </table>
@@ -1026,13 +1008,13 @@ export function RabReport({ projectName, result, loading, error, onBack, routerC
             </div>
 
             <p className="formal-paragraph">
-              Seluruh parameter rute dan infrastruktur fisik telah selesai disurvei dan diverifikasi secara langsung di lapangan (100% Field-Verified on-site). Ringkasan status teknis konstruksi:
+              Status verifikasi berikut merangkum data yang tersedia. Keberadaan geometri atau objek proyek tidak dengan sendirinya berarti sudah diverifikasi di lapangan:
             </p>
 
             <ul className="formal-bullet-list">
-              <li><strong>Rute Fisik Kabel:</strong> 125 segmen kabel (total rute 11.933,83 m) telah diverifikasi di lapangan sesuai koridor jalan riil dan kelayakan bentangan kabel udara/drop.</li>
-              <li><strong>Infrastruktur Tiang:</strong> Seluruh 9 titik tiang (4 tiang baru, 2 tiang eksisting, 3 tiang bersama PLN/operator) telah diverifikasi struktural dan izin lintasannya; 0 tiang berstatus unverified.</li>
-              <li><strong>Kesiapan Pengadaan &amp; Konstruksi:</strong> Bill of Quantities (BoQ) telah terbebas dari item tertunda (0 incomplete items), siap digunakan untuk pelaksanaan instalasi jaringan FTTH.</li>
+              <li><strong>Rute Kabel:</strong> {cableAudit.reduce((sum, row) => sum + (Array.isArray(row.cableSegmentIds) ? row.cableSegmentIds.length : 0), 0)} segmen tercatat; panjang hasil kalkulasi {typeof result.summary?.totalCableRouteMeters === "number" ? `${formatReportNumber(result.summary.totalCableRouteMeters)} m` : "belum tersedia"}. Status survei lapangan tidak disimpulkan otomatis.</li>
+              <li><strong>Tiang:</strong> {countDisplay(typeof result.summary?.poleCount === "number" ? result.summary.poleCount : null)} ID tiang unik tercatat; {String(poleStatusCounts.unverified ?? "—")} belum terverifikasi.</li>
+              <li><strong>Kesiapan biaya:</strong> {result.incompleteItems?.length ?? "—"} item belum lengkap menurut backend. Laporan ini tidak menyatakan siap konstruksi jika kuantitas atau harga masih belum lengkap.</li>
             </ul>
           </section>
 

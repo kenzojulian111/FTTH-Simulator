@@ -6,9 +6,9 @@ export interface ProjectApi {
   saveProject(project: Project): Promise<Project>;
   deleteProject(id: string): Promise<void>;
   listProjects(): Promise<ProjectSummary[]>;
-  calculateOpticalBudget(projectId: string): Promise<OpticalBudgetResult>;
-  calculateConstructionCost(projectId: string): Promise<ConstructionCostResult>;
-  calculatePoleSpans(projectId: string): Promise<PoleSpanResult>;
+  calculateOpticalBudget(project: Project): Promise<OpticalBudgetResult>;
+  calculateConstructionCost(project: Project): Promise<ConstructionCostResult>;
+  calculatePoleSpans(project: Project): Promise<PoleSpanResult>;
   validateTopology(projectId: string, project?: Project): Promise<TopologyValidationResult>;
   validateConnection(projectId: string, request: ConnectionValidationRequest): Promise<TopologyValidationResult>;
   importKmz(files: File[], name?: string): Promise<Project>;
@@ -19,11 +19,11 @@ export async function saveThenCalculate<T>(
   api: ProjectApi,
   project: Project,
   onSaved: (savedProject: Project) => boolean,
-  calculate: (projectId: string) => Promise<T>,
+  calculate: (project: Project) => Promise<T>,
 ): Promise<{ project: Project; result: T } | null> {
   const savedProject = await api.saveProject(project);
   if (!onSaved(savedProject)) return null;
-  return { project: savedProject, result: await calculate(savedProject.id) };
+  return { project: savedProject, result: await calculate(savedProject) };
 }
 
 export class ApiError extends Error {
@@ -50,19 +50,44 @@ function parseProjectSummaryList(value: unknown): ProjectSummary[] {
 export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi/api/v1"): ProjectApi {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
   const normalizedKmzBaseUrl = kmzBaseUrl.replace(/\/+$/, "");
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  async function request<T>(path: string, init?: RequestInit, requestBase = normalizedBaseUrl): Promise<T> {
     let response: Response;
-    try { response = await fetch(`${normalizedBaseUrl}${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }); }
-    catch { throw new ApiError("Could not reach the project server. Check your connection and try again."); }
+    try {
+      const headers = {
+        ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      };
+      response = await fetch(`${requestBase}${path}`, { ...init, headers });
+    }
+    catch { throw new ApiError(requestBase === normalizedBaseUrl
+      ? "Could not reach the project server. Check your connection and try again."
+      : "Could not reach the FastAPI engineering service. Start the integrated stack with npm run dev:stack."); }
     if (!response.ok) {
       let message = `Request failed (${response.status}).`;
       let details: string[] | undefined;
+      let rawBody = "";
+      let body: Record<string, unknown> | undefined;
       try {
-        const body = await response.json();
-        if (typeof body.error?.message === "string") message = body.error.message;
+        rawBody = await response.text();
+        if (rawBody) {
+          const parsed: unknown = JSON.parse(rawBody);
+          if (isRecord(parsed)) body = parsed;
+        }
+      } catch { /* try JSON-only response mocks or nonstandard adapters below */ }
+      if (!body) {
+        try {
+          const parsed: unknown = await response.json();
+          if (isRecord(parsed)) body = parsed;
+        }
+        catch { /* response was not JSON */ }
+      }
+      if (body) {
+        const apiError = isRecord(body.error) ? body.error : undefined;
+        if (typeof apiError?.message === "string") message = apiError.message;
         else if (typeof body.detail === "string") message = body.detail;
-        details = Array.isArray(body.error?.details) ? body.error.details.map((detail: { field?: string; message: string }) => `${detail.field ? `${detail.field}: ` : ""}${detail.message}`) : undefined;
-      } catch { /* response had no JSON body */ }
+        details = Array.isArray(apiError?.details) ? apiError.details.filter(isRecord).map((detail) => `${typeof detail.field === "string" ? `${detail.field}: ` : ""}${typeof detail.message === "string" ? detail.message : "Invalid project data"}`) : undefined;
+      }
+      if (!body && rawBody.trim()) message = rawBody.trim().slice(0, 500);
       throw new ApiError(details?.length ? `${message} ${details.join("; ")}` : message, response.status, details);
     }
     if (response.status === 204) return undefined as T;
@@ -75,9 +100,9 @@ export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi
     saveProject: (project) => request<Project>(`/projects/${encodeURIComponent(project.id)}`, { method: "PUT", body: JSON.stringify(project) }),
     deleteProject: (id) => request<void>(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
     async listProjects() { return parseProjectSummaryList(await request<unknown>(`/projects`)); },
-    calculateOpticalBudget: (id) => request(`/projects/${encodeURIComponent(id)}/calculations/optical-budget`, { method: "POST" }),
-    calculateConstructionCost: (id) => request(`/projects/${encodeURIComponent(id)}/calculations/construction-cost`, { method: "POST" }),
-    calculatePoleSpans: (id) => request(`/projects/${encodeURIComponent(id)}/calculations/pole-spans`, { method: "POST" }),
+    calculateOpticalBudget: (project) => request("/integrations/calculations/optical-budget", { method: "POST", body: JSON.stringify(project) }, normalizedKmzBaseUrl),
+    calculateConstructionCost: (project) => request("/integrations/calculations/construction-cost", { method: "POST", body: JSON.stringify(project) }, normalizedKmzBaseUrl),
+    calculatePoleSpans: (project) => request("/integrations/calculations/pole-spans", { method: "POST", body: JSON.stringify(project) }, normalizedKmzBaseUrl),
     validateTopology: (id, project) => request(`/projects/${encodeURIComponent(id)}/validate-topology`, { method: "POST", ...(project ? { body: JSON.stringify(project) } : {}) }),
     validateConnection: (id, validation) => request(`/projects/${encodeURIComponent(id)}/validate-connection`, { method: "POST", body: JSON.stringify(validation) }),
     async importKmz(files: File[], name?: string): Promise<Project> {

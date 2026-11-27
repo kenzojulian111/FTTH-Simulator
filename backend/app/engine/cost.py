@@ -258,11 +258,14 @@ def calculate_construction_cost(
             standalone_splitters.append(s)
 
     integrated_enclosure_splitters = []
+    deduplicated_property_count = 0
     for node in unique_nodes.values():
         if node.type in {NodeType.ODP, NodeType.ODC}:
             props = node.properties or {}
             has_prop = "splitterRatio" in props or "splitterLossDb" in props
             has_mounted = node.id in mounted_by_container and len(mounted_by_container[node.id]) > 0
+            if has_prop and has_mounted:
+                deduplicated_property_count += 1
             if has_prop and not has_mounted:
                 integrated_enclosure_splitters.append(node)
 
@@ -299,8 +302,9 @@ def calculate_construction_cost(
     )
 
     assumptions.append(
-        f"Splitter procurement includes {splitter_count} physical units (2 feeder splitters in ODC 1 and 14 access splitters across ODP 1–14). "
-        f"The 13 duplicate ODP component property declarations have been de-duplicated with mounted splitter nodes, and 1 legacy disconnected splitter is excluded from procurement."
+        f"Splitter procurement includes {splitter_count} physical unit(s) identified from the project model. "
+        f"Mounted splitter nodes and integrated enclosure declarations are de-duplicated; "
+        f"{len(legacy_disconnected_splitters)} disconnected legacy splitter(s) are excluded from procurement."
     )
 
     # ONT & Customer counts (Planned, Assigned, Connected)
@@ -560,7 +564,9 @@ def calculate_construction_cost(
             continue
         item.unit_cost_source = rate_source
         item.unit_cost_reference = config.rate_references.get(rate_key)
-        if rate_source == "configured":
+        if rate_source == "legacy_illustrative":
+            item.rate_status = "Legacy Illustrative"
+        elif rate_source == "configured":
             ref_l = (item.unit_cost_reference or "").lower()
             item.rate_status = "Verified Quotation" if "quote" in ref_l or "quotation" in ref_l else "Historical Rate" if "hist" in ref_l else "Planning Estimate"
         else:
@@ -611,12 +617,12 @@ def calculate_construction_cost(
         "odpCount": odp_count,
         "splitterCount": splitter_count,
         "activeSplitterCount": total_active_splitters,
-        "feederSplitterCount": feeder_splitter_count if feeder_splitter_count > 0 else 2,
-        "distributionSplitterCount": (odp_mounted_splitter_count + odp_integrated_splitter_count) if (odp_mounted_splitter_count + odp_integrated_splitter_count) > 0 else 14,
+        "feederSplitterCount": feeder_splitter_count,
+        "distributionSplitterCount": odp_mounted_splitter_count + odp_integrated_splitter_count,
         "procuredSplitterCount": splitter_count,
         "splitterProcurementDifference": splitter_count - total_active_splitters,
         "legacyDisconnectedSplitterCount": len(legacy_disconnected_splitters),
-        "deduplicatedPropertyCount": 13 if len(legacy_disconnected_splitters) > 0 else 0,
+        "deduplicatedPropertyCount": deduplicated_property_count,
         "ontCount": total_ont_count,
         "routerCount": router_count,
         "integratedRouterCount": integrated_router_count,

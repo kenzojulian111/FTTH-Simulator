@@ -503,7 +503,8 @@ export function App() {
       };
       if (kind === "optical") {
         setTopologyValidation(null); setTopologyValidationError(null);
-        const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, async (id) => {
+        const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, async (savedProject) => {
+          const id = savedProject.id;
           if (api.mode === "http") {
             try {
               const validation = await api.validateTopology(id, savedProjectForValidation);
@@ -512,14 +513,14 @@ export function App() {
               if (latestEditorStateRef.current.project.id === id && latestEditorStateRef.current.revision === requestedRevision && latestEditorStateRef.current.generation === requestedGeneration) setTopologyValidationError(validationError instanceof Error ? validationError.message : "Project topology validation failed.");
             }
           }
-          return api.calculateOpticalBudget(id);
+          return api.calculateOpticalBudget(savedProject);
         });
         if (outcome && latestEditorStateRef.current.project.id === outcome.project.id && latestEditorStateRef.current.revision === requestedRevision && latestEditorStateRef.current.generation === requestedGeneration) setOpticalResult(outcome.result);
       } else if (kind === "cost") {
-        const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, (id) => api.calculateConstructionCost(id));
+        const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, (savedProject) => api.calculateConstructionCost(savedProject));
         if (outcome && latestEditorStateRef.current.project.id === outcome.project.id && latestEditorStateRef.current.revision === requestedRevision && latestEditorStateRef.current.generation === requestedGeneration) setCostResult(outcome.result);
       } else {
-        const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, (id) => api.calculatePoleSpans(id));
+        const outcome = await saveThenCalculate(api, projectToCalculate, commitCalculationSave, (savedProject) => api.calculatePoleSpans(savedProject));
         if (outcome && latestEditorStateRef.current.project.id === outcome.project.id && latestEditorStateRef.current.revision === requestedRevision && latestEditorStateRef.current.generation === requestedGeneration) setPoleSpanResult(outcome.result);
       }
       if (api.mode === "http") setBackendStatus("online");

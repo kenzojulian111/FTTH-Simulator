@@ -177,6 +177,22 @@ async def parse_kmz_for_external_persistence(
     )
 
 
+@router.post("/integrations/calculations/optical-budget", response_model=OpticalBudgetResult)
+async def calculate_optical_budget_for_project(project: Project):
+    """Calculate directly from the saved Rust project without duplicating it in SQLite."""
+    return calculate_optical_budget(project)
+
+
+@router.post("/integrations/calculations/construction-cost", response_model=ConstructionCostResult)
+async def calculate_construction_cost_for_project(project: Project):
+    return calculate_construction_cost(project)
+
+
+@router.post("/integrations/calculations/pole-spans", response_model=PoleSpanResult)
+async def calculate_pole_spans_for_project(project: Project):
+    return calculate_pole_spans(project)
+
+
 @router.get("/projects/{project_id}", response_model=Project)
 async def get_project(project_id: str, db: Session = Depends(get_db)):
     """Retrieve a project aggregate by ID."""

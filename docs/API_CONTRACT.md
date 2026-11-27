@@ -23,6 +23,18 @@ The canonical `Project`, `NetworkNode`, `Customer`, `CableSegment`, `TopologyCon
 | `POST` | `/validate-router-config` | Pre-validate a standalone `RouterConfig` payload; returns `RouterValidationResponse` |
 | `POST` | `/projects/{projectId}/nodes/{nodeId}/validate-router` | Validate router configuration for a specific node in a saved project; returns `RouterValidationResponse` |
 
+### Integrated development services
+
+The development stack keeps Rust as the project persistence/API service (`:8000`) and FastAPI as the canonical engineering calculation and KMZ parsing service (`:8001`). Vite proxies `/fastapi/*` to FastAPI. The additive FastAPI calculation endpoints accept the canonical saved `Project` payload directly and do not write it to FastAPI's SQLite database:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/integrations/calculations/optical-budget` | Calculate optical paths from the supplied project aggregate |
+| `POST` | `/api/v1/integrations/calculations/construction-cost` | Calculate RAB from the supplied project aggregate |
+| `POST` | `/api/v1/integrations/calculations/pole-spans` | Calculate pole/span planning from the supplied project aggregate |
+
+The frontend saves through Rust first, then submits the returned canonical project payload to these endpoints. Rust's legacy calculation routes remain available for compatibility; the application UI currently uses FastAPI's Python engines for these calculations. Avoid treating Rust and Python calculation outputs as interchangeable until their engine behavior and result contracts have been reconciled.
+
 ### `ProjectSummary` Schema
 ```json
 {

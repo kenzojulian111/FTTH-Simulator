@@ -288,11 +288,15 @@ pub fn calculate_construction_cost(
     }
 
     let mut integrated_enclosure_splitters = Vec::new();
+    let mut deduplicated_property_count = 0usize;
     for node in unique_nodes.values() {
         if node.r#type == NodeType::Odp || node.r#type == NodeType::Odc {
             let has_prop = node.properties.contains_key("splitterRatio")
                 || node.properties.contains_key("splitterLossDb");
             let has_mounted = mounted_by_container.get(&node.id).map(|v| !v.is_empty()).unwrap_or(false);
+            if has_prop && has_mounted {
+                deduplicated_property_count += 1;
+            }
             if has_prop && !has_mounted {
                 integrated_enclosure_splitters.push(*node);
             }
@@ -338,8 +342,9 @@ pub fn calculate_construction_cost(
     };
 
     assumptions.push(format!(
-        "Splitter procurement includes {} physical units (2 feeder splitters in ODC 1 and 14 access splitters across ODP 1–14). The 13 duplicate ODP component property declarations have been de-duplicated with mounted splitter nodes, and 1 legacy disconnected splitter is excluded from procurement.",
-        splitter_count
+        "Splitter procurement includes {} physical unit(s) identified from the project model. Mounted splitter nodes and integrated enclosure declarations are de-duplicated; {} disconnected legacy splitter(s) are excluded from procurement.",
+        splitter_count,
+        legacy_disconnected_splitters.len()
     ));
 
     // Customer & ONT counts
@@ -634,16 +639,12 @@ pub fn calculate_construction_cost(
         "odpCount": odp_count,
         "splitterCount": splitter_count,
         "activeSplitterCount": total_active_splitters,
-        "feederSplitterCount": if feeder_splitter_count > 0 { feeder_splitter_count } else { 2 },
-        "distributionSplitterCount": if (odp_mounted_splitter_count + odp_integrated_splitter_count) > 0 {
-            odp_mounted_splitter_count + odp_integrated_splitter_count
-        } else {
-            14
-        },
+        "feederSplitterCount": feeder_splitter_count,
+        "distributionSplitterCount": odp_mounted_splitter_count + odp_integrated_splitter_count,
         "procuredSplitterCount": splitter_count,
         "splitterProcurementDifference": (splitter_count as isize) - (total_active_splitters as isize),
         "legacyDisconnectedSplitterCount": legacy_disconnected_splitters.len(),
-        "deduplicatedPropertyCount": if !legacy_disconnected_splitters.is_empty() { 13 } else { 0 },
+        "deduplicatedPropertyCount": deduplicated_property_count,
         "ontCount": total_ont_count,
         "plannedCustomerCount": total_planned_customers,
         "assignedOntCount": assigned_ont_count,
@@ -706,5 +707,9 @@ mod tests {
         let result = calculate_construction_cost(&project, None);
         assert_eq!(result.total_amount, 0.0);
         assert!(result.complete);
+        let summary = result.summary.expect("cost summary is returned");
+        assert_eq!(summary["feederSplitterCount"], 0);
+        assert_eq!(summary["distributionSplitterCount"], 0);
+        assert_eq!(summary["deduplicatedPropertyCount"], 0);
     }
 }

@@ -263,51 +263,32 @@ VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 
 ## Running the Application & Development Workflow
 
-### Option A: Local Development with Rust Backend (Core API)
+### Recommended: Integrated local development stack
 
-Run the high-performance Rust backend and React frontend concurrently in two separate terminals:
+The complete application uses the Rust service for project save/load and the
+FastAPI service for optical/RAB/pole calculations and KMZ import/export. Start
+all three services from the repository root:
 
-**Terminal 1 — Rust Backend API (Port 8000):**
 ```bash
-npm run backend:rust
-# Atau untuk mode release yang dioptimasi:
-# npm run backend:rust:release
-# Atau langsung via Cargo:
-# cargo run --manifest-path backend-rust/Cargo.toml
+npm run dev:stack
 ```
-* Backend API root: `http://127.0.0.1:8000`
-* Health check: `http://127.0.0.1:8000/health`
-* Database: Pure-Rust embedded Redb (`ftth_simulator.redb`)
-* Optical Budget and RAB endpoints are available. KMZ/KML import and export are currently available through the Python backend below, not this Rust server.
 
-**Terminal 2 — Frontend Dev Server (Port 5173):**
-```bash
-npm run dev
-```
-* Web Application: `http://localhost:5173`
-* Vite automatically proxies all `/api/v1/*` requests to the backend at `http://127.0.0.1:8000`.
+* Web app: `http://localhost:5173`
+* Rust project API and Redb storage: `http://127.0.0.1:8000`
+* FastAPI engineering/KMZ API and Swagger: `http://127.0.0.1:8001/docs`
 
----
+The command checks ports `8000`, `8001`, and `5173` before starting. If a port
+is already in use, identify its owner with `ss -ltnp 'sport = :8001'` (replace
+the port as needed), stop that specific process, and run the command again.
+Use Ctrl+C to stop the stack.
 
-### Option B: Local Development with Python FastAPI (Full Feature / KMZ Support)
+### Running an individual backend for API development
 
-Use the Python FastAPI backend when testing Google Earth KMZ / KML import-export workflows:
-
-**Terminal 1 — Python Backend API (Port 8000):**
-```bash
-source .venv/bin/activate
-python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
-```
-* Backend API root: `http://127.0.0.1:8000`
-* Interactive API Docs (Swagger): `http://127.0.0.1:8000/docs`
-* Health check: `http://127.0.0.1:8000/health`
-* Database: SQLite aggregate store (`ftth_simulator.db`)
-
-**Terminal 2 — Frontend Dev Server (Port 5173):**
-```bash
-npm run dev
-```
-* Web Application: `http://localhost:5173`
+`npm run backend:rust` starts only the Rust project API. It does not start the
+FastAPI calculation/KMZ service required by the complete UI workflow. FastAPI
+can also be started alone for Python API development with
+`source .venv/bin/activate && python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000`;
+that mode uses SQLite and is not the integrated Rust + FastAPI UI setup above.
 
 ---
 
@@ -507,9 +488,12 @@ Contributions to the FTTH Network Planning Simulator are welcome. To contribute:
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for the complete license terms.
 # Run the integrated development stack
 
-Use `npm run dev:stack` from the project root to start the Rust API (port 8000),
-the FastAPI KMZ parser (port 8001), and Vite together. The frontend sends project
-storage and engineering calculations to Rust. FastAPI parses KMZ/KML without
-persisting it; the imported project is then saved to Rust's Redb store. Stop the
-stack with Ctrl+C. This command expects the project virtual environment at
-`.venv/bin/python` and Rust/Cargo to be installed.
+Use `npm run dev:stack` from the project root to start the Rust project API
+(port 8000), FastAPI engineering/KMZ service (port 8001), and Vite (port 5173).
+Project save/load uses Rust and Redb. After saving, the UI sends the canonical
+project payload to FastAPI's optical-budget, construction-cost, and pole-span
+engines; KMZ parsing also uses FastAPI and does not persist to its SQLite store.
+Stop the stack with Ctrl+C. This command expects the project virtual environment
+(`.venv/bin/python` on Unix or `.venv/Scripts/python.exe` on Windows) and
+Rust/Cargo to be installed. If a required port is already occupied, stop the
+process that owns it before restarting the stack.
