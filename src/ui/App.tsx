@@ -365,7 +365,7 @@ export function App() {
 
   async function exportKmz() {
     try {
-      const response = await fetch(`${import.meta.env.VITE_KMZ_API_BASE_URL || "/fastapi/api/v1"}/projects/${encodeURIComponent(state.project.id)}/export-kmz`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || "/api/v1"}/projects/${encodeURIComponent(state.project.id)}/export-kmz`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.project),
       });
       if (!response.ok) throw new Error(`KMZ export failed (${response.status}).`);

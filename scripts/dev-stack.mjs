@@ -67,16 +67,14 @@ process.once("SIGINT", () => stop(130));
 process.once("SIGTERM", () => stop(143));
 
 try {
-  await assertPortAvailable(8000, "Rust API");
-  await assertPortAvailable(8001, "FastAPI engineering/KMZ service");
+  await assertPortAvailable(8000, "FastAPI API and SQLite persistence");
   await assertPortAvailable(5173, "Vite");
 } catch (error) {
   console.error(error.message);
   process.exit(1);
 }
 
-start("FastAPI engineering/KMZ :8001", python, ["-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", "8001"]);
-start("Rust project API :8000", "cargo", ["run", "--manifest-path", "backend-rust/Cargo.toml"], { FTTH_PORT: "8000" });
+start("FastAPI canonical API :8000", python, ["-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", "8000", "--workers", "1"]);
 start("Vite", "npm", ["run", "dev"]);
 
-console.log("FTTH dev stack starting: Rust project API :8000, FastAPI engineering/KMZ :8001, Vite :5173.");
+console.log("FTTH dev stack starting: FastAPI + SQLite :8000, Vite :5173. Rust is not used by the application stack.");

@@ -14,9 +14,9 @@ describe("ImportKmzDialog backend guidance", () => {
     root = null; host?.remove(); host = null;
   });
 
-  it("shows the integrated stack command and disables repeat import if FastAPI is offline", async () => {
+  it("shows the application stack command and disables repeat import if FastAPI is offline", async () => {
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-    const onImport = vi.fn(async () => { throw new Error("Could not reach the KMZ parser (FastAPI). Start the integrated stack with npm run dev:stack."); });
+    const onImport = vi.fn(async () => { throw new Error("Could not reach the FastAPI server. Check that the backend is running and try again."); });
     act(() => root?.render(<ImportKmzDialog onImport={onImport} onSuccess={() => undefined} onClose={() => undefined} />));
 
     const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -27,9 +27,9 @@ describe("ImportKmzDialog backend guidance", () => {
     const submit = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.includes("Import & Open Project"))!;
     await act(async () => { submit.click(); });
 
-    expect(host.textContent).toContain("FastAPI KMZ service is not responding");
+    expect(host.textContent).toContain("FastAPI API is not responding");
     expect(host.textContent).toContain("npm run dev:stack");
-    const disabledButton = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.includes("Start the integrated backend stack"));
+    const disabledButton = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.includes("Start the application stack"));
     expect(disabledButton?.disabled).toBe(true);
     expect(onImport).toHaveBeenCalledTimes(1);
   });

@@ -20,20 +20,16 @@ The canonical `Project`, `NetworkNode`, `Customer`, `CableSegment`, `TopologyCon
 | `POST` | `/projects/{projectId}/calculations/pole-spans` | Calculate explicit pole spans, diagnostics, and configured additional-pole estimates |
 | `POST` | `/projects/{projectId}/validate-connection` | Pre-validate candidate connection against GPON topology rules; body is `ConnectionValidationRequest`; returns `TopologyValidationResult` |
 | `GET`, `POST` | `/projects/{projectId}/validate-topology` | Validate all connections and topology constraints across the project; returns `TopologyValidationResult` |
+| `POST` | `/projects/import-kmz` | Import and persist uploaded KMZ/KML files in the canonical SQLite store |
+| `POST` | `/projects/{projectId}/export-kmz` | Export the supplied project as KMZ |
 | `POST` | `/validate-router-config` | Pre-validate a standalone `RouterConfig` payload; returns `RouterValidationResponse` |
 | `POST` | `/projects/{projectId}/nodes/{nodeId}/validate-router` | Validate router configuration for a specific node in a saved project; returns `RouterValidationResponse` |
 
-### Integrated development services
+### Canonical server and persistence
 
-The development stack keeps Rust as the project persistence/API service (`:8000`) and FastAPI as the canonical engineering calculation and KMZ parsing service (`:8001`). Vite proxies `/fastapi/*` to FastAPI. The additive FastAPI calculation endpoints accept the canonical saved `Project` payload directly and do not write it to FastAPI's SQLite database:
+The supported application stack uses FastAPI as its only backend and SQLite as its only project store. CRUD, calculations, topology validation, geocoding, and KMZ import/export are served from the same `/api/v1` origin and read/write the same SQLite database. Calculation requests use the saved project ID; save the project before requesting a calculation.
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/v1/integrations/calculations/optical-budget` | Calculate optical paths from the supplied project aggregate |
-| `POST` | `/api/v1/integrations/calculations/construction-cost` | Calculate RAB from the supplied project aggregate |
-| `POST` | `/api/v1/integrations/calculations/pole-spans` | Calculate pole/span planning from the supplied project aggregate |
-
-The frontend saves through Rust first, then submits the returned canonical project payload to these endpoints. Rust's legacy calculation routes remain available for compatibility; the application UI currently uses FastAPI's Python engines for these calculations. Avoid treating Rust and Python calculation outputs as interchangeable until their engine behavior and result contracts have been reconciled.
+`backend-rust/` remains an isolated prototype with a separate Redb store. It is not used by the frontend, is not synchronized with SQLite, and must not be treated as a second server for editing canonical project records. The `/integrations/*` FastAPI endpoints remain available for compatibility with older clients but are not used by the current frontend.
 
 ### `ProjectSummary` Schema
 ```json

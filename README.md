@@ -3,7 +3,7 @@
 > An interactive FTTH network planning and optical link budget simulation platform.
 
 [![Rust](https://img.shields.io/badge/Rust-Axum%20%7C%20SQLx-orange.svg)](https://www.rust-lang.org/)
-[![Database](https://img.shields.io/badge/Database-Redb%20%7C%20SQLite-brightgreen.svg)](https://github.com/cberner/redb)
+[![Database](https://img.shields.io/badge/Database-SQLite-brightgreen.svg)](https://www.sqlite.org/)
 [![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18.3.1-61dafb.svg)](https://react.dev/)
@@ -91,8 +91,8 @@ flowchart TD
         API_Client["API Service Layer (Fetch / Proxy)"]
     end
 
-    subgraph Server ["Backend (Rust Engine / Python API)"]
-        Router["Axum / FastAPI REST Router (/api/v1)"]
+    subgraph Server ["Canonical Backend (FastAPI)"]
+        Router["FastAPI REST Router (/api/v1)"]
         Val["Topology Validation & Cycle Detection"]
         Opt["Optical Link Budget Engine"]
         Cost["CAPEX & BoQ Engine"]
@@ -102,10 +102,8 @@ flowchart TD
     end
 
     subgraph Storage ["Persistence Layer"]
-        RedbStore["Redb Storage Engine (Zero-C Native Rust)"]
-        DB_Redb[("Pure-Rust Database (ftth_simulator.redb)")]
         Repo["SQLAlchemy Repository"]
-        DB_SQLite[("SQLite Database (ftth_simulator.db)")]
+        DB_SQLite[("Canonical SQLite Database (ftth_simulator.db)")]
     end
 
     subgraph External ["External Services"]
@@ -129,15 +127,13 @@ flowchart TD
     Pole --> Geo
     Cost --> Geo
 
-    Router --> RedbStore
-    RedbStore --> DB_Redb
     Router --> Repo
     Repo --> DB_SQLite
 ```
 
 ### Architectural Highlights
 * **Domain Model Aggregation:** The `Project` model acts as the root aggregate. Nodes, connections, cable segments, customer records, and engineering settings are persisted atomically to prevent orphaned records.
-* **Pure-Rust Embedded Database (Redb):** The Rust backend uses `redb`, a 100% memory-safe, zero-C-dependency ACID B-tree embedded database stored in `ftth_simulator.redb` with automatic SQLite data migration.
+* **Single canonical store:** The application uses FastAPI and SQLite for project persistence, calculations, and KMZ import/export. The Rust/Redb backend remains an experimental standalone prototype and is not used by the frontend or the standard development/production stack.
 * **Decoupled Engines:** The calculation modules (`optical`, `cost`, `pole`) are pure domain services operating on deterministic models. They can be invoked independently via unit tests or script pipelines without running a web server.
 * **In-Memory & API Modes:** The frontend includes an in-memory client adapter for standalone browser testing and seamlessly connects to the backend when `VITE_API_BASE_URL` is configured.
 
@@ -151,11 +147,10 @@ flowchart TD
 | **Language (Frontend)** | TypeScript | `~5.6.2` | Static type safety and strict schema alignment |
 | **Build Tooling** | Vite | `^8.3.6` | Fast development server and production bundler |
 | **Mapping & GIS** | Leaflet & React-Leaflet | `1.9.4` / `4.2.1` | Interactive vector map and layer rendering |
-| **Backend (Rust)** | Axum + Tokio | `0.8` / `1.40` | High-performance native async REST API |
-| **Backend (Python)** | FastAPI + Uvicorn | `>=0.115.0` | Alternative Python async REST API |
+| **Canonical backend** | FastAPI + Uvicorn | `>=0.115.0` | REST API, engineering calculations, KMZ, and persistence |
+| **Experimental backend** | Axum + Tokio | `0.8` / `1.40` | Standalone prototype; not connected to the application stack |
 | **Data Validation** | Serde / Pydantic (v2) | `1.0` / `>=2.8` | Strict request/response schema modeling |
-| **Database (Native Rust)** | Redb | `4.6.0` | Pure-Rust embedded ACID B-tree database (`ftth_simulator.redb`) |
-| **Database (SQL Fallback)** | SQLite 3 | Embedded | Single-file SQL aggregate store (`ftth_simulator.db`) |
+| **Database** | SQLite | Embedded | Canonical project persistence (`ftth_simulator.db`) |
 | **Testing (Backend)** | Cargo test / Pytest | Native / `>=8.0` | Automated backend engine and API route testing |
 | **Testing (Frontend)** | Vitest & JSDOM | `^5.1.0` / `^25.0.1` | Unit and component integration testing |
 | **Containerization** | Docker | Multi-stage | Alpine Node.js builder + runtime |
@@ -166,7 +161,7 @@ flowchart TD
 
 ```text
 .
-├── backend-rust/           # High-performance native Rust backend (Axum, Tokio, Redb database)
+├── backend-rust/           # Experimental standalone Rust backend prototype (not used by the app stack)
 │   ├── src/                # Cost, optical budget, pole span, and validation engines
 │   └── Cargo.toml          # Rust dependencies & binary configuration
 ├── backend/                # Python FastAPI reference implementation
@@ -189,8 +184,8 @@ flowchart TD
 │   │   ├── reports/        # Engineering reports, optical tables, and RAB sheets
 │   │   └── ImportKmzDialog.tsx # Interactive dialog for uploading and parsing KMZ files
 │   └── styles.css          # Application layout styling and formal report design
-├── ftth_simulator.redb     # Pure-Rust embedded ACID database (Default for Rust backend)
-├── ftth_simulator.db       # SQLite database (Fallback / portable SQL format)
+├── ftth_simulator.db       # Canonical SQLite project database
+├── ftth_simulator.redb     # Experimental Rust prototype database; separate and not synchronized
 ├── Dockerfile              # Production multi-stage Docker build specification
 ├── render.yaml             # Render Blueprint configuration for single-container deployment
 ├── package.json            # Node.js dependencies and frontend scripts
@@ -203,8 +198,8 @@ flowchart TD
 
 ### Prerequisites
 * **Node.js:** `v18.0.0` or higher (`v20+` or `v22+` recommended)
-* **Rust:** `1.80.0` or higher (for the high-performance native Rust backend)
-* **Python:** `3.12` or `3.14` (optional, for the FastAPI backend)
+* **Python:** `3.12` or `3.14` (required for the canonical FastAPI backend)
+* **Rust:** `1.80.0` or higher (optional, only to work on the standalone prototype)
 * **Git:** Latest version
 
 ### 1. Clone the Repository
@@ -219,14 +214,9 @@ Install Node.js dependencies:
 npm install
 ```
 
-### 3. Backend Environment Setup
+### 3. Canonical Backend Setup
 
-#### Option 1: Rust Backend (Recommended - Fast & Low Memory)
-Ensure you have Rust and Cargo installed (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
-No extra pip dependencies needed!
-
-#### Option 2: Python Backend (Alternative)
-Create and activate a Python virtual environment:
+The application uses the FastAPI backend for project storage, calculations, and KMZ import/export. Create and activate a Python virtual environment:
 
 **Linux / macOS:**
 ```bash
@@ -254,7 +244,6 @@ Ensure `.env.local` contains:
 ```dotenv
 VITE_API_BASE_URL=/api/v1
 FTTH_ENVIRONMENT=development
-FTTH_REDB_PATH=ftth_simulator.redb
 FTTH_DATABASE_URL=sqlite:///./ftth_simulator.db
 VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 ```
@@ -263,32 +252,23 @@ VITE_EARTH_TILE_PROVIDER=esri_world_imagery
 
 ## Running the Application & Development Workflow
 
-### Recommended: Integrated local development stack
+### Recommended: Local development stack
 
-The complete application uses the Rust service for project save/load and the
-FastAPI service for optical/RAB/pole calculations and KMZ import/export. Start
-all three services from the repository root:
+Start the canonical FastAPI + SQLite backend and Vite frontend from the repository root:
 
 ```bash
 npm run dev:stack
 ```
 
 * Web app: `http://localhost:5173`
-* Rust project API and Redb storage: `http://127.0.0.1:8000`
-* FastAPI engineering/KMZ API and Swagger: `http://127.0.0.1:8001/docs`
+* FastAPI API, calculations, KMZ, and SQLite storage: `http://127.0.0.1:8000`
+* Swagger UI: `http://127.0.0.1:8000/docs`
 
-The command checks ports `8000`, `8001`, and `5173` before starting. If a port
-is already in use, identify its owner with `ss -ltnp 'sport = :8001'` (replace
-the port as needed), stop that specific process, and run the command again.
-Use Ctrl+C to stop the stack.
+The command checks ports `8000` and `5173` before starting. If a port is already in use, identify its owner and stop that specific process before restarting. Use Ctrl+C to stop the stack.
 
-### Running an individual backend for API development
+### Experimental Rust backend
 
-`npm run backend:rust` starts only the Rust project API. It does not start the
-FastAPI calculation/KMZ service required by the complete UI workflow. FastAPI
-can also be started alone for Python API development with
-`source .venv/bin/activate && python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000`;
-that mode uses SQLite and is not the integrated Rust + FastAPI UI setup above.
+The Rust API can still be launched with `npm run backend:rust` for isolated prototype work. It uses its own Redb store and is not wired to the UI or synchronized with the canonical SQLite database. Do not use it to edit the same project data as the FastAPI application.
 
 ---
 
@@ -395,11 +375,11 @@ See [docs/API_CONTRACT.md](docs/API_CONTRACT.md) for full request/response schem
 
 The codebase includes comprehensive unit, integration, and type-checking suites across both frontend and backend.
 
-### Running Backend Tests (Rust & Cargo)
+### Running Experimental Rust Backend Tests
 ```bash
 cargo test --manifest-path backend-rust/Cargo.toml
 ```
-* **Coverage:** Native tests verifying geodesic calculations, Haversine formula, and BoQ calculation logic.
+* **Coverage:** Prototype tests; these do not validate the canonical FastAPI application.
 
 ### Running Backend Tests (Python Pytest)
 ```bash
@@ -465,7 +445,7 @@ Transparent engineering assumptions governing current simulation calculations:
 Status fitur dan roadmap pengembangan:
 
 - [x] **Google Earth KMZ / KML Integration:** Import dan export aset jaringan, rute kabel, node, dan lokasi pelanggan langsung ke/dari file `.kmz` / `.kml`.
-- [x] **Pure-Rust Embedded Database (Redb):** Penyimpanan ACID embedded native Rust berperforma tinggi dengan auto-migrasi dari SQLite.
+- [ ] **Rust Backend Prototype Integration:** Rust/Redb remains an isolated prototype; the application currently uses FastAPI/SQLite as its only supported backend.
 - [ ] **Data Export Formats:** Export aset jaringan ke format GIS standar tambahan (GeoJSON, ESRI Shapefile).
 - [ ] **Multi-User Collaboration:** User authentication, role-based access control (RBAC), and project revision locking.
 - [ ] **PostgreSQL / PostGIS Adapter:** Optional database driver configuration for spatial indexing and concurrent multi-tenant storage.
@@ -488,12 +468,9 @@ Contributions to the FTTH Network Planning Simulator are welcome. To contribute:
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for the complete license terms.
 # Run the integrated development stack
 
-Use `npm run dev:stack` from the project root to start the Rust project API
-(port 8000), FastAPI engineering/KMZ service (port 8001), and Vite (port 5173).
-Project save/load uses Rust and Redb. After saving, the UI sends the canonical
-project payload to FastAPI's optical-budget, construction-cost, and pole-span
-engines; KMZ parsing also uses FastAPI and does not persist to its SQLite store.
-Stop the stack with Ctrl+C. This command expects the project virtual environment
-(`.venv/bin/python` on Unix or `.venv/Scripts/python.exe` on Windows) and
-Rust/Cargo to be installed. If a required port is already occupied, stop the
-process that owns it before restarting the stack.
+Use `npm run dev:stack` from the project root to start the canonical FastAPI/SQLite
+backend (port 8000) and Vite (port 5173). Project CRUD, calculations, and KMZ
+import/export all use this same backend and database. Stop the stack with Ctrl+C.
+This command expects the project virtual environment (`.venv/bin/python` on Unix
+or `.venv/Scripts/python.exe` on Windows). The standalone Rust/Redb prototype is
+not part of the supported application stack and has no database synchronization.

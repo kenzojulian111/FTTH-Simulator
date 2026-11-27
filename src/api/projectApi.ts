@@ -47,21 +47,18 @@ function parseProjectSummaryList(value: unknown): ProjectSummary[] {
   return value.projects;
 }
 
-export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi/api/v1"): ProjectApi {
+export function createHttpProjectApi(baseUrl = "/api/v1"): ProjectApi {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
-  const normalizedKmzBaseUrl = kmzBaseUrl.replace(/\/+$/, "");
-  async function request<T>(path: string, init?: RequestInit, requestBase = normalizedBaseUrl): Promise<T> {
+  async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response;
     try {
       const headers = {
         ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...init?.headers,
       };
-      response = await fetch(`${requestBase}${path}`, { ...init, headers });
+      response = await fetch(`${normalizedBaseUrl}${path}`, { ...init, headers });
     }
-    catch { throw new ApiError(requestBase === normalizedBaseUrl
-      ? "Could not reach the project server. Check your connection and try again."
-      : "Could not reach the FastAPI engineering service. Start the integrated stack with npm run dev:stack."); }
+    catch { throw new ApiError("Could not reach the FastAPI server. Check that the backend is running and try again."); }
     if (!response.ok) {
       let message = `Request failed (${response.status}).`;
       let details: string[] | undefined;
@@ -100,9 +97,9 @@ export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi
     saveProject: (project) => request<Project>(`/projects/${encodeURIComponent(project.id)}`, { method: "PUT", body: JSON.stringify(project) }),
     deleteProject: (id) => request<void>(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
     async listProjects() { return parseProjectSummaryList(await request<unknown>(`/projects`)); },
-    calculateOpticalBudget: (project) => request("/integrations/calculations/optical-budget", { method: "POST", body: JSON.stringify(project) }, normalizedKmzBaseUrl),
-    calculateConstructionCost: (project) => request("/integrations/calculations/construction-cost", { method: "POST", body: JSON.stringify(project) }, normalizedKmzBaseUrl),
-    calculatePoleSpans: (project) => request("/integrations/calculations/pole-spans", { method: "POST", body: JSON.stringify(project) }, normalizedKmzBaseUrl),
+    calculateOpticalBudget: (project) => request(`/projects/${encodeURIComponent(project.id)}/calculations/optical-budget`, { method: "POST" }),
+    calculateConstructionCost: (project) => request(`/projects/${encodeURIComponent(project.id)}/calculations/construction-cost`, { method: "POST" }),
+    calculatePoleSpans: (project) => request(`/projects/${encodeURIComponent(project.id)}/calculations/pole-spans`, { method: "POST" }),
     validateTopology: (id, project) => request(`/projects/${encodeURIComponent(id)}/validate-topology`, { method: "POST", ...(project ? { body: JSON.stringify(project) } : {}) }),
     validateConnection: (id, validation) => request(`/projects/${encodeURIComponent(id)}/validate-connection`, { method: "POST", body: JSON.stringify(validation) }),
     async importKmz(files: File[], name?: string): Promise<Project> {
@@ -113,12 +110,12 @@ export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi
       }
       let response: Response;
       try {
-        response = await fetch(`${normalizedKmzBaseUrl}/integrations/kmz/import`, {
+        response = await fetch(`${normalizedBaseUrl}/projects/import-kmz`, {
           method: "POST",
           body: formData,
         });
       } catch {
-        throw new ApiError("Could not reach the KMZ parser (FastAPI). Start the integrated stack with npm run dev:stack.");
+        throw new ApiError("Could not reach the FastAPI server. Check that the backend is running and try again.");
       }
       if (!response.ok) {
         let message = `Import failed (${response.status}).`;
@@ -135,13 +132,7 @@ export function createHttpProjectApi(baseUrl = "/api/v1", kmzBaseUrl = "/fastapi
         } catch { /* response had no JSON body */ }
         throw new ApiError(details.length ? `${message} ${details.join("; ")}` : message, response.status, details);
       }
-      const parsedProject = (await response.json()) as Project;
-      // FastAPI only parses the files. The project is persisted by the primary Rust API,
-      // keeping all projects and calculations in the same Redb database.
-      return request<Project>(`/projects/${encodeURIComponent(parsedProject.id)}`, {
-        method: "PUT",
-        body: JSON.stringify(parsedProject),
-      });
+      return (await response.json()) as Project;
     },
   };
 }
@@ -168,6 +159,5 @@ export function createMemoryProjectApi(initial?: Project): ProjectApi {
 
 export function createProjectApi(): ProjectApi {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
-  const kmzBaseUrl = import.meta.env.VITE_KMZ_API_BASE_URL || "/fastapi/api/v1";
-  return createHttpProjectApi(baseUrl, kmzBaseUrl);
+  return createHttpProjectApi(baseUrl);
 }

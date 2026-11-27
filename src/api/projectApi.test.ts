@@ -54,7 +54,7 @@ describe("HTTP project API adapter", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ projects: [{ id: project.id, name: project.name, description: "A design", currency: "IDR", updatedAt: project.updatedAt }] }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ projects: [{ id: "missing-fields" }] }) });
     vi.stubGlobal("fetch", fetchMock);
-    const api = createHttpProjectApi("http://localhost:8000/api/v1", "http://localhost:8001/api/v1");
+    const api = createHttpProjectApi("http://localhost:8000/api/v1");
     await expect(api.listProjects()).resolves.toEqual([{ id: project.id, name: project.name, description: "A design", currency: "IDR", updatedAt: project.updatedAt }]);
     await expect(api.listProjects()).rejects.toThrow("invalid project list");
   });
@@ -86,7 +86,7 @@ describe("HTTP project API adapter", () => {
   it("surfaces backend validation details from its error envelope", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 422, json: async () => ({ error: { code: "validation_error", message: "Invalid project", details: [{ field: "nodes[0].name", message: "Must not be empty" }] } }) });
     vi.stubGlobal("fetch", fetchMock);
-    const api = createHttpProjectApi("http://localhost:8000/api/v1", "http://localhost:8001/api/v1");
+    const api = createHttpProjectApi("http://localhost:8000/api/v1");
 
     await expect(api.saveProject(createEmptyProject())).rejects.toThrow("nodes[0].name: Must not be empty");
   });
@@ -99,17 +99,16 @@ describe("HTTP project API adapter", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => optical })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => cost });
     vi.stubGlobal("fetch", fetchMock);
-    const api = createHttpProjectApi("http://localhost:8000/api/v1", "http://localhost:8001/api/v1");
+    const api = createHttpProjectApi("http://localhost:8000/api/v1");
 
     expect(await api.calculateOpticalBudget(project)).toEqual(optical);
     expect(await api.calculateConstructionCost(project)).toEqual(cost);
     expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["http://localhost:8001/api/v1/integrations/calculations/optical-budget", "POST"],
-      ["http://localhost:8001/api/v1/integrations/calculations/construction-cost", "POST"],
+      [`http://localhost:8000/api/v1/projects/${project.id}/calculations/optical-budget`, "POST"],
+      [`http://localhost:8000/api/v1/projects/${project.id}/calculations/construction-cost`, "POST"],
     ]);
-    expect(fetchMock.mock.calls[0][1].headers).toEqual({ "Content-Type": "application/json" });
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).id).toBe(project.id);
-    expect(fetchMock.mock.calls[1][1].headers).toEqual({ "Content-Type": "application/json" });
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
+    expect(fetchMock.mock.calls[1][1].body).toBeUndefined();
   });
 
   it("calls the explicit pole-span planning endpoint", async () => {
@@ -117,9 +116,9 @@ describe("HTTP project API adapter", () => {
     const poleResult = { projectId: project.id, calculatedAt: project.updatedAt, spans: [], diagnostics: [], estimatedAdditionalPoles: null, assumptions: ["No route coverage"] };
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => poleResult });
     vi.stubGlobal("fetch", fetchMock);
-    const api = createHttpProjectApi("http://localhost:8000/api/v1", "http://localhost:8001/api/v1");
+    const api = createHttpProjectApi("http://localhost:8000/api/v1");
     await expect(api.calculatePoleSpans(project)).resolves.toEqual(poleResult);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8001/api/v1/integrations/calculations/pole-spans");
+    expect(fetchMock.mock.calls[0][0]).toBe(`http://localhost:8000/api/v1/projects/${project.id}/calculations/pole-spans`);
     expect(fetchMock.mock.calls[0][1].method).toBe("POST");
   });
 
@@ -152,7 +151,7 @@ describe("HTTP project API adapter", () => {
     });
   });
 
-  it("surfaces plain-text Axum errors instead of hiding them behind a status code", async () => {
+  it("surfaces plain-text backend errors instead of hiding them behind a status code", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -184,19 +183,16 @@ describe("HTTP project API adapter", () => {
     expect(form.getAll("files")).toHaveLength(2);
   });
 
-  it("parses KMZ through FastAPI then persists the imported project through Rust", async () => {
-    const parsed = createEmptyProject("Survey import");
-    const saved = { ...parsed, updatedAt: "2026-11-23T00:00:00Z" };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => parsed })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => saved });
+  it("imports and persists a KMZ project through the canonical FastAPI backend", async () => {
+    const saved = { ...createEmptyProject("Survey import"), updatedAt: "2026-11-23T00:00:00Z" };
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 201, json: async () => saved });
     vi.stubGlobal("fetch", fetchMock);
-    const api = createHttpProjectApi("http://localhost:8000/api/v1", "http://localhost:8001/api/v1");
+    const api = createHttpProjectApi("http://localhost:8000/api/v1");
 
     await expect(api.importKmz([new File(["kml"], "survey.kmz")], "Survey import")).resolves.toEqual(saved);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8001/api/v1/integrations/kmz/import");
-    expect(fetchMock.mock.calls[1][0]).toBe(`http://localhost:8000/api/v1/projects/${parsed.id}`);
-    expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/api/v1/projects/import-kmz");
+    expect((fetchMock.mock.calls[0][1].body as FormData).get("name")).toBe("Survey import");
   });
 
   it("persists the project before calculating with the canonical saved ID", async () => {
@@ -219,7 +215,7 @@ describe("HTTP project API adapter", () => {
     expect(outcome?.project.updatedAt).toBe(savedProject.updatedAt);
     expect(outcome?.result).toEqual(cost);
     expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
-    expect(fetchMock.mock.calls[1][0]).toBe("/fastapi/api/v1/integrations/calculations/construction-cost");
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).id).toBe(project.id);
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/v1/projects/${project.id}/calculations/construction-cost`);
+    expect(fetchMock.mock.calls[1][1].body).toBeUndefined();
   });
 });

@@ -12,7 +12,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
   const [projectName, setProjectName] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [backendUnsupported, setBackendUnsupported] = useState(false);
+  const [backendUnavailable, setBackendUnavailable] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleFilesSelected(fileList: FileList | null) {
@@ -47,7 +47,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to import KMZ file. Check the server connection.";
       setError(message);
-      if (message.includes("Could not reach the KMZ parser (FastAPI)")) setBackendUnsupported(true);
+      if (message.includes("Could not reach the FastAPI server")) setBackendUnavailable(true);
     } finally {
       setLoading(false);
     }
@@ -113,7 +113,7 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
 
           <div className="kmz-feature-features-box">
             <h4>Automatic Capabilities:</h4>
-            {!backendUnsupported && <p role="note" className="kmz-backend-note">KMZ parsing runs in FastAPI; projects, optical calculations, and RAB stay on the Rust API. Start both together with <code>npm run dev:stack</code>.</p>}
+            {!backendUnavailable && <p role="note" className="kmz-backend-note">KMZ import and project saving use the same FastAPI backend and SQLite database.</p>}
             <ul>
               <li><strong>Multi-file import:</strong> Select multiple KMZ/KML files at once and combine them into one project.</li>
               <li><strong>Placemark Recognition:</strong> Recognizes OLT, ODC, ODP, poles, manholes, handholes, ONTs, and customer locations from names and folders.</li>
@@ -123,11 +123,11 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
           </div>
 
           {error && (
-            backendUnsupported ? <div className="kmz-backend-error" role="alert">
-              <strong>KMZ parser is unavailable.</strong>
-              <span>The FastAPI KMZ service is not responding. In the project directory, start the integrated development stack:</span>
+            backendUnavailable ? <div className="kmz-backend-error" role="alert">
+              <strong>Backend is unavailable.</strong>
+              <span>The FastAPI API is not responding. In the project directory, start the application stack:</span>
               <code>npm run dev:stack</code>
-              <span>This starts Rust on port 8000, FastAPI on port 8001, and Vite. Existing Rust projects remain the source of truth.</span>
+              <span>This starts FastAPI on port 8000 and Vite on port 5173.</span>
             </div> : <div className="project-library-error" role="alert" style={{ marginTop: "12px" }}>{error}</div>
           )}
         </div>
@@ -140,9 +140,9 @@ export function ImportKmzDialog({ onImport, onSuccess, onClose }: ImportKmzDialo
             type="button"
             className="primary-button"
             onClick={handleSubmit}
-            disabled={!selectedFiles.length || loading || backendUnsupported}
+            disabled={!selectedFiles.length || loading || backendUnavailable}
           >
-            {loading ? "Importing & Saving…" : backendUnsupported ? "Start the integrated backend stack" : "Import & Open Project"}
+            {loading ? "Importing & Saving…" : backendUnavailable ? "Start the application stack" : "Import & Open Project"}
           </button>
         </footer>
       </section>

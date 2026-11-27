@@ -6,10 +6,5 @@ export default defineConfig({
   test: { environment: "jsdom" },
   server: { host: "0.0.0.0", proxy: {
     "/api/v1": "http://127.0.0.1:8000",
-    "/fastapi": {
-      target: "http://127.0.0.1:8001",
-      changeOrigin: true,
-      rewrite: (path) => path.replace(/^\/fastapi/, ""),
-    },
   } },
 });

@@ -1047,15 +1047,19 @@ export function OpticalEngineeringReport({
               const minRx = "minBranchPowerDbm" in odpItem ? odpItem.minBranchPowerDbm : null;
               const maxRx = "maxBranchPowerDbm" in odpItem ? odpItem.maxBranchPowerDbm : null;
               const id = "nodeId" in odpItem ? odpItem.nodeId : odpItem.odpId;
+              const branch = analysis.infrastructureBranches.find((item) => item.odpId === id);
+              const routeLengthM = branch?.feederCableLengthM != null && branch.distributionCableLengthM != null
+                ? branch.feederCableLengthM + branch.distributionCableLengthM
+                : null;
 
               return (
                 <tr key={id ?? `odp-${odpIdx}`}>
                   <td><strong>{stripUuidParenthesesOnly(name)}</strong></td>
-                  <td className="numeric">1,182.85 m</td>
-                  <td className="numeric">{incoming != null ? `${formatReportNumber(incoming)} dBm` : "-6.62 dBm"}</td>
+                  <td className="numeric">{routeLengthM != null ? `${formatReportNumber(routeLengthM)} m` : "—"}</td>
+                  <td className="numeric">{incoming != null ? `${formatReportNumber(incoming)} dBm` : "—"}</td>
                   <td className="numeric">{splitLoss != null ? `${formatReportNumber(splitLoss)} dB` : "—"}</td>
-                  <td className="numeric">{minRx != null ? `${formatReportNumber(minRx)} dBm` : "-16.86 dBm"}</td>
-                  <td className="numeric">{maxRx != null ? `${formatReportNumber(maxRx)} dBm` : "-16.63 dBm"}</td>
+                  <td className="numeric">{minRx != null ? `${formatReportNumber(minRx)} dBm` : "—"}</td>
+                  <td className="numeric">{maxRx != null ? `${formatReportNumber(maxRx)} dBm` : "—"}</td>
                 </tr>
               );
             })}
